@@ -153,6 +153,50 @@ Notes that cost time to rediscover:
 * `CMAKE_BUILD_TYPE` defaults to `Release` when unset (mirrors
   `native/ngx_shim`).
 
+### Cross-compiling for arm64 (Android and Linux)
+
+`build_cross.sh` stages an arm64 `libcaustica_nrd.so` for each target beside the host build:
+
+```sh
+# Arm64 Android (NDK) and Arm64 Linux (Zig). DXC is the host shader compiler, as for the host build.
+export DXC_PATH=/path/to/dxc
+
+native/nrd_shim/build_cross.sh                     # every target this host can build
+native/nrd_shim/build_cross.sh android             # Android only, needs the NDK
+ZIG=/path/to/zig native/nrd_shim/build_cross.sh linux
+```
+
+| target | artifact | toolchain | runtime dependencies |
+|---|---|---|---|
+| `android-arm64` | `build/native/nrd_shim/android-arm64/release/libcaustica_nrd.so` | NDK clang, `arm64-v8a`, API 26, `c++_static` | `libm`, `libdl`, `libc` |
+| `linux-arm64` | `build/native/nrd_shim/linux-arm64/release/libcaustica_nrd.so` | Zig, `-target aarch64-linux-gnu.2.17` | `libm`, `libpthread`, `libc`, `libdl` |
+
+`gradle bundleNrdNatives` picks up every `build/native/nrd_shim/<platform>/release/` directory it
+finds, so both are packaged as `caustica/natives/<platform>/libcaustica_nrd.so` next to the host
+artifact, and `RtNrd` selects the directory from the JVM's OS/arch (Android identifies itself as
+Linux, so it is detected by `java.vm.name`/`java.runtime.name` first).
+
+What the cross builds rely on:
+
+* **Run the host build once first.** They reuse its fetched `_deps` (`nrd-src`, `mathlib-src`,
+  `shadermake-src`, `vulkan-headers-src`), its host `ShaderMake` and a host DXC, and are configured
+  with `FETCHCONTENT_FULLY_DISCONNECTED=ON`, so a cross build performs no network I/O. NRD's shaders
+  are target-independent and are compiled by host tools; only the C++ library is cross-compiled.
+* **`sse2neon`**: MathLib fetches it for every ARM target. The script expects a checkout at
+  `build/native/nrd_shim/build/_deps/sse2neon-src` (a shallow clone of
+  `https://github.com/DLTcollab/sse2neon.git` is enough).
+* **Zig** supplies the arm64 Linux compiler, its libc and its libc++ in one tarball, and `zig c++`
+  links libc++ statically — which is why the artifact needs no `libc++.so` on the target. Pinning the
+  target to glibc 2.17 (the aarch64 baseline) is what keeps the required symbol floor low.
+* Zig's driver rejects `-Wl,--exclude-libs,ALL`, so `CMakeLists.txt` checks for that flag and falls
+  back to an export version script, which pins the same three-symbol ABI (GNU ld, LLD and the NDK
+  linker all keep using `--exclude-libs`).
+* Both artifacts link with `-Wl,--no-undefined`, so every import has to resolve from their own
+  `DT_NEEDED` list. That is also what proves the shim never calls a Vulkan entry point directly.
+* Debug info is stripped with `llvm-objcopy --strip-debug` (~12 MiB → ~5.4 MiB) unless
+  `KEEP_DEBUG_INFO=1` is set. The dynamic symbol table — and therefore the three ABI entry points —
+  is untouched.
+
 ### Environment variables
 
 | variable | purpose |
@@ -207,7 +251,7 @@ build/native/nrd_shim/release/libcaustica_nrd.so
 ```
 
 5,000,368 bytes, `sha256
-fa578173ce6f392e0ed5ed745fd2f7dec7b09301068f74b57a11a511cb5c3a7d`. A from-scratch
+4a5e7243c812a340352f2151a11005f5c6d9b9436176bff9ddac28afafd3a262`. A from-scratch
 configure+build (empty binary directory, separate output root) reproduces that
 hash byte for byte.
 
@@ -216,10 +260,15 @@ embedded inside) plus this shim. NRD source, its fetched dependencies and its
 generated `_Shaders` all live under `build/native/nrd_shim/build` — NRD is
 fetched at configure time and is never vendored into this repository.
 
+The arm64 builds land in the same shape under `build/native/nrd_shim/<platform>/release/`
+(5.5 MiB for Linux arm64, 5.4 MiB for Android arm64, both with debug info stripped; see the
+cross-compiling section above).
+
 Exported symbols — the dynamic symbol table contains nothing else (NRD's
 internals are built hidden, this translation unit is built with
 `CXX_VISIBILITY_PRESET hidden`, and the static libraries are linked with
-`-Wl,--exclude-libs,ALL`):
+`-Wl,--exclude-libs,ALL`, or with a three-symbol export version script where the
+compiler driver rejects that flag):
 
 ```
 $ nm -D --defined-only build/native/nrd_shim/release/libcaustica_nrd.so
@@ -439,5 +488,12 @@ at `/tmp/dxctest/linux_dxc_2026_07_29.x86_x64/bin/dxc`; the build log prints it 
 * The build is reproducible: a from-scratch configure+build into a separate
   output root produced the identical `sha256`.
 
-Not verified: behaviour on a mobile driver (no Android device here), and image
-quality on real path-traced input (the test scene is constant by design).
+The arm64 Linux artifact was also loaded and exercised on this machine under
+`qemu-aarch64-static` (with an arm64 Ubuntu base rootfs supplying the dynamic loader and libc):
+`dlopen` succeeds, all three entry points resolve, and `caustica_nrd_create(NULL)` /
+`caustica_nrd_denoise(NULL)` return the ABI's `-1` "bad arguments" code, so the C++ runtime, the
+static initializers and the C ABI all work on the target architecture.
+
+Not verified: behaviour on a mobile driver (no Android device here — the Android artifact is
+verified statically: architecture, API level, `DT_NEEDED`, undefined-symbol check and exported
+symbol set), and image quality on real path-traced input (the test scene is constant by design).

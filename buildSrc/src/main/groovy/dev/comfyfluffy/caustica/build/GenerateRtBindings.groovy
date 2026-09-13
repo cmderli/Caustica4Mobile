@@ -47,6 +47,15 @@ abstract class GenerateRtBindings extends DefaultTask {
                     COLOR: "colorImage", BINS: "histBins", DEPTH: "depthImage", ALBEDO: "albedoImage"]],
             [prefix: "EXPOSURE_RESOLVE", source: "pipelines/exposure_resolve/main.comp.slang", resources: [
                     HIST_BINS: "histBins", IMAGE: "exposureImage", STATE: "stateBuf"]],
+            [prefix: "SGSR_CONVERT", source: "pipelines/sgsr/convert.comp.slang", resources: [
+                    COLOR: "inputColor", DEPTH: "inputDepth", VELOCITY: "inputVelocity",
+                    ALPHA: "inputAlpha", YCOCG_OUT: "outYCoCg", MOTION_OUT: "outMotionDepthAlpha"]],
+            [prefix: "SGSR_ACTIVATE", source: "pipelines/sgsr/activate.comp.slang", resources: [
+                    LUMA_IN: "prevLumaHistory", MOTION_IN: "motionDepthAlpha", YCOCG_IN: "yCoCgColor",
+                    MOTIONCLIP_OUT: "outMotionDepthClipAlpha", LUMA_OUT: "outLumaHistory"]],
+            [prefix: "SGSR_UPSCALE", source: "pipelines/sgsr/upscale.comp.slang", resources: [
+                    HISTORY_IN: "prevHistory", MOTIONCLIP_IN: "motionDepthClipAlpha", YCOCG_IN: "yCoCgColor",
+                    HISTORY_OUT: "outHistory", SCENE_OUT: "outSceneColor"]],
             [prefix: "MOTION_BLUR", source: "pipelines/motion_blur/main.comp.slang", resources: [
                     SOURCE: "sceneImage", MOTION: "gMotion", DEPTH: "gDepth", OUTPUT: "outputImage"]],
             [prefix: "BLOOM", source: "pipelines/bloom/main.comp.slang", resources: [

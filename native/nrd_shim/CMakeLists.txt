@@ -128,6 +128,13 @@ target_compile_definitions(caustica_nrd PRIVATE
     CAUSTICA_NRD_EXPECTED_NORMAL_ENCODING=${NRD_NORMAL_ENCODING}
     CAUSTICA_NRD_EXPECTED_ROUGHNESS_ENCODING=${NRD_ROUGHNESS_ENCODING})
 
+# The shim is loaded by name from a JVM, so it may not have a single unresolved import: everything it calls
+# has to be resolvable from its own DT_NEEDED list. This is also what proves the shim never references a
+# Vulkan entry point directly (it reaches them through the device proc address the caller passes in).
+if(UNIX AND NOT APPLE)
+  target_link_options(caustica_nrd PRIVATE "-Wl,--no-undefined")
+endif()
+
 set_target_properties(caustica_nrd PROPERTIES
     OUTPUT_NAME "caustica_nrd"
     POSITION_INDEPENDENT_CODE ON
@@ -141,6 +148,22 @@ nrdshim_set_artifact_dirs(caustica_nrd)
 # NRD's static libraries are built without a visibility preset, so their symbols
 # (NRD internals are hidden, but ShaderMakeBlob's are not) would otherwise land in
 # this library's dynamic symbol table. Only the three ABI functions are exported.
+#
+# GNU ld and LLD do that with --exclude-libs, which hides everything pulled from an
+# archive. Zig's compiler driver rejects the flag, so when the linker does not take it
+# a version script pins the exported set instead - the same guarantee, stated directly.
 if(UNIX AND NOT APPLE)
-  target_link_options(caustica_nrd PRIVATE "-Wl,--exclude-libs,ALL")
+  include(CheckLinkerFlag)
+  check_linker_flag(CXX "-Wl,--exclude-libs,ALL" CAUSTICA_NRD_HAS_EXCLUDE_LIBS)
+  if(CAUSTICA_NRD_HAS_EXCLUDE_LIBS)
+    target_link_options(caustica_nrd PRIVATE "-Wl,--exclude-libs,ALL")
+  else()
+    set(CAUSTICA_NRD_VERSION_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/caustica_nrd.map")
+    file(WRITE "${CAUSTICA_NRD_VERSION_SCRIPT}"
+        "CAUSTICA_NRD_1.0 {\n  global:\n"
+        "    caustica_nrd_create;\n    caustica_nrd_denoise;\n    caustica_nrd_destroy;\n"
+        "  local:\n    *;\n};\n")
+    target_link_options(caustica_nrd PRIVATE "-Wl,--version-script=${CAUSTICA_NRD_VERSION_SCRIPT}")
+    message(STATUS "caustica_nrd: linking with an export version script (no --exclude-libs support)")
+  endif()
 endif()

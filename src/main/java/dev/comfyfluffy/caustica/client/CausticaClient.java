@@ -2,6 +2,8 @@ package dev.comfyfluffy.caustica.client;
 
 import dev.comfyfluffy.caustica.CausticaMod;
 import dev.comfyfluffy.caustica.rt.RtContext;
+import dev.comfyfluffy.caustica.rt.RtShutdown;
+import dev.comfyfluffy.caustica.rt.RtShutdownGuard;
 import dev.comfyfluffy.caustica.rt.RtDeviceBringup;
 import dev.comfyfluffy.caustica.rt.RtComposite;
 import dev.comfyfluffy.caustica.rt.RtFrameStats;
@@ -18,6 +20,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.InvalidateRenderStateCallback
 
 public final class CausticaClient implements ClientModInitializer {
 	private static boolean rtInitDone = false;
+	private static boolean loggedRtNeverStarted = false;
 
 	@Override
 	public void onInitializeClient() {
@@ -45,6 +48,16 @@ public final class CausticaClient implements ClientModInitializer {
 				if (ctx != null) {
 					rtInitDone = true;
 				}
+			} else if (!rtInitDone && !loggedRtNeverStarted) {
+				// The Vulkan backend latches rtRequested while it creates the device, which happens before
+				// the first tick. Reaching a tick without it means this session never brought up an
+				// RT-capable Vulkan device at all: either Minecraft is running on its OpenGL backend — a
+				// launcher's "Vulkan"/Zink renderer is OpenGL over Vulkan, not the Vulkan backend — or the
+				// device was rejected earlier, which the bring-up logged.
+				loggedRtNeverStarted = true;
+				CausticaMod.LOGGER.info("Caustica ray tracing is inactive: Minecraft did not come up on an "
+						+ "RT-capable Vulkan backend (OpenGL/Zink sessions never start it; see any earlier "
+						+ "'Ray tracing unavailable' line for a device that was rejected)");
 			}
 
 			// Once RT is up, keep section residency synced to vanilla's loaded chunks around
@@ -79,14 +92,40 @@ public final class CausticaClient implements ClientModInitializer {
 
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
 			shutdownRt();
+			// Minecraft's exit waits for every non-daemon JVM thread, and Android launchers attach native
+			// threads of their own to this JVM. The guard makes the difference between a launcher thread
+			// that outlives the window — which the shutdown watchdog would report as a crash — and a clean
+			// exit, and it names that thread in the log.
+			RtShutdownGuard.start();
 		});
 	}
 
+	/** Runs one teardown step, logging its cost and swallowing failures so later steps still run. */
+	private static void rtShutdownStep(String label, long mark, Runnable step) {
+		try {
+			step.run();
+			RtShutdown.step(label, mark);
+		} catch (Throwable t) {
+			dev.comfyfluffy.caustica.CausticaMod.LOGGER.warn("RT shutdown: {} failed; continuing teardown",
+					label, t);
+		}
+	}
+
 	private static void shutdownRt() {
-		WorldRenderScaler.INSTANCE.destroy();
-		RtUiOverlay.destroy(); // GUI redirect is not gated by rtInitDone; always release its TextureTarget
+		// Everything below runs on the render thread while Minecraft's client shutdown watchdog counts down.
+		// Each step is logged with its cost and is individually failure-tolerant, so a step that throws or
+		// times out leaves a record in the log instead of silently skipping the rest of the teardown.
+		RtShutdown.begin();
+		long teardownStart = RtShutdown.mark();
+		long mark = RtShutdown.mark();
+		rtShutdownStep("window scaler", mark, WorldRenderScaler.INSTANCE::destroy);
+		mark = RtShutdown.mark();
+		// GUI redirect is not gated by rtInitDone; always release its TextureTarget.
+		rtShutdownStep("UI overlay", mark, RtUiOverlay::destroy);
 		if (!rtInitDone) {
-			RtWorkerPool.INSTANCE.shutdown();
+			mark = RtShutdown.mark();
+			rtShutdownStep("worker pool", mark, RtWorkerPool.INSTANCE::shutdown);
+			RtShutdown.step("complete (RT never initialized)", teardownStart);
 			return;
 		}
 
@@ -94,25 +133,34 @@ public final class CausticaClient implements ClientModInitializer {
 		if (ctx != null) {
 			// Let the terrain epoch cancel queued work and release every active-task token before
 			// shutdownNow(): discarded worker Runnables cannot deliver their terminal callbacks.
-			RtTerrain.shutdown(ctx);
+			mark = RtShutdown.mark();
+			rtShutdownStep("terrain", mark, () -> RtTerrain.shutdown(ctx));
 		}
-		RtWorkerPool.INSTANCE.shutdown();
+		mark = RtShutdown.mark();
+		rtShutdownStep("worker pool", mark, RtWorkerPool.INSTANCE::shutdown);
 		if (ctx != null) {
-			RtEntities.INSTANCE.shutdown();
+			mark = RtShutdown.mark();
+			rtShutdownStep("entities", mark, RtEntities.INSTANCE::shutdown);
 		}
-		RtComposite.INSTANCE.destroy();
-		RtEntityTextures.INSTANCE.reset();
-		RtBlockMaterials.INSTANCE.destroy();
-		dev.comfyfluffy.caustica.rt.pipeline.RtDlssFg.INSTANCE.destroy();
+		mark = RtShutdown.mark();
+		rtShutdownStep("composite", mark, RtComposite.INSTANCE::destroy);
+		mark = RtShutdown.mark();
+		rtShutdownStep("entity textures", mark, RtEntityTextures.INSTANCE::reset);
+		rtShutdownStep("block materials", mark, RtBlockMaterials.INSTANCE::destroy);
+		rtShutdownStep("frame generation", mark, dev.comfyfluffy.caustica.rt.pipeline.RtDlssFg.INSTANCE::destroy);
 		if (ctx != null) {
-			dev.comfyfluffy.caustica.rt.RtFramePresenter.INSTANCE.destroy(ctx.device());
-			dev.comfyfluffy.caustica.rt.RtReflex.INSTANCE.destroy(ctx.device().vkDevice());
+			rtShutdownStep("frame presenter", mark,
+					() -> dev.comfyfluffy.caustica.rt.RtFramePresenter.INSTANCE.destroy(ctx.device()));
+			rtShutdownStep("reflex", mark,
+					() -> dev.comfyfluffy.caustica.rt.RtReflex.INSTANCE.destroy(ctx.device().vkDevice()));
 		}
+		mark = RtShutdown.mark();
 		// Shut NGX down once, after every feature (RR + FG) has been released above.
-		dev.comfyfluffy.caustica.ngx.NgxRuntime.INSTANCE.shutdown();
+		rtShutdownStep("NGX", mark, dev.comfyfluffy.caustica.ngx.NgxRuntime.INSTANCE::shutdown);
 		if (ctx != null) {
-			ctx.destroy();
+			rtShutdownStep("device objects", mark, ctx::destroy);
 		}
+		RtShutdown.step("complete", teardownStart);
 		rtInitDone = false;
 	}
 }

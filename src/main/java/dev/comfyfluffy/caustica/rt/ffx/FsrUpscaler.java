@@ -6,21 +6,18 @@ import com.mojang.blaze3d.vulkan.VulkanDevice;
 import dev.comfyfluffy.caustica.CausticaConfig;
 import dev.comfyfluffy.caustica.CausticaMod;
 import dev.comfyfluffy.caustica.mixin.GpuDeviceAccessor;
+import dev.comfyfluffy.caustica.rt.BundledNative;
 import dev.comfyfluffy.caustica.rt.RtContext;
 import dev.comfyfluffy.caustica.rt.accel.RtImage;
 
-import net.fabricmc.loader.api.FabricLoader;
 
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkInstance;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 
 /**
  * FSR 3.1 temporal upscaler over the AMD FidelityFX API, used as the upscaling half of the built-in
@@ -36,7 +33,7 @@ import java.util.Arrays;
 public final class FsrUpscaler {
     public static final FsrUpscaler INSTANCE = new FsrUpscaler();
 
-    private static final PlatformNatives NATIVES = PlatformNatives.current();
+    private static final BundledNative NATIVE = new BundledNative("caustica-fsr", "amd_fidelityfx_vk");
     private static final long RESET_WAIT_TIMEOUT_NS = 200_000_000L;
 
     private FfxLibrary lib;
@@ -66,26 +63,36 @@ public final class FsrUpscaler {
             return available;
         }
         probeAttempted = true;
-        Path library = locateLibrary();
-        if (library == null) {
-            CausticaMod.LOGGER.info("FSR unavailable: {} not found (bundled natives, run/natives, or -Dcaustica.fsr.path)",
-                    NATIVES.libraryName());
-            return false;
-        }
-        try {
-            FfxLibrary loaded = FfxLibrary.load(library);
-            var versions = FfxUpscaleContext.queryAvailableVersions(loaded);
-            available = !versions.isEmpty();
-            if (available) {
-                lib = loaded;
-                CausticaMod.LOGGER.info("FSR upscaling available ({} version {})", library,
-                        versions.get(versions.size() - 1).name());
-            } else {
-                CausticaMod.LOGGER.warn("FSR runtime at {} exposes no upscale provider", library);
+        // Every candidate is tried: a runtime that exists but cannot be opened (Android's linker refuses
+        // the external game directory) must not stop the search from reaching one that can.
+        Path lastSeen = null;
+        Throwable lastFailure = null;
+        for (Path library : NATIVE.candidates(CausticaConfig.Fsr.PATH.get())) {
+            if (!Files.isRegularFile(library)) {
+                continue;
             }
-        } catch (Throwable t) {
+            lastSeen = library;
+            try {
+                FfxLibrary loaded = FfxLibrary.load(library);
+                var versions = FfxUpscaleContext.queryAvailableVersions(loaded);
+                if (!versions.isEmpty()) {
+                    lib = loaded;
+                    available = true;
+                    CausticaMod.LOGGER.info("FSR upscaling available ({} version {})", library,
+                            versions.get(versions.size() - 1).name());
+                    break;
+                }
+                CausticaMod.LOGGER.warn("FSR runtime at {} exposes no upscale provider", library);
+            } catch (Throwable t) {
+                lastFailure = t;
+            }
+        }
+        if (!available && lastSeen == null) {
+            CausticaMod.LOGGER.info("FSR unavailable: {} not found (bundled natives, run/natives, or -Dcaustica.fsr.path)",
+                    NATIVE.libraryName());
+        } else if (!available) {
             CausticaMod.LOGGER.warn("FSR runtime at {} could not be loaded; upscaling stays on the built-in resolve",
-                    library, t);
+                    lastSeen, lastFailure);
         }
         return available;
     }
@@ -256,72 +263,4 @@ public final class FsrUpscaler {
         contextQuality = Integer.MIN_VALUE;
     }
 
-    private static Path locateLibrary() {
-        String override = CausticaConfig.Fsr.PATH.get();
-        if (override != null && !override.isBlank()) {
-            Path path = Path.of(override);
-            if (Files.isDirectory(path)) {
-                path = path.resolve(NATIVES.libraryName());
-            }
-            return Files.isRegularFile(path) ? path : null;
-        }
-        Path bundled = extractBundledLibrary();
-        if (bundled != null) {
-            return bundled;
-        }
-        Path gameDir = FabricLoader.getInstance().getGameDir();
-        Path[] candidates = {
-                gameDir.resolve("natives").resolve(NATIVES.libraryName()),
-                gameDir.resolve(NATIVES.libraryName())};
-        for (Path candidate : candidates) {
-            if (Files.isRegularFile(candidate)) {
-                return candidate;
-            }
-        }
-        return null;
-    }
-
-    private static Path extractBundledLibrary() {
-        Path dir = FabricLoader.getInstance().getGameDir().resolve("caustica-fsr")
-                .resolve("natives").resolve(NATIVES.platformDir());
-        Path library = dir.resolve(NATIVES.libraryName());
-        String resource = "/caustica/natives/" + NATIVES.platformDir() + "/" + NATIVES.libraryName();
-        try (InputStream in = FsrUpscaler.class.getResourceAsStream(resource)) {
-            if (in == null) {
-                return null;
-            }
-            byte[] bytes = in.readAllBytes();
-            Files.createDirectories(dir);
-            if (!Files.isRegularFile(library) || !sameBytes(library, bytes)) {
-                Files.write(library, bytes);
-            }
-            return library;
-        } catch (IOException e) {
-            CausticaMod.LOGGER.warn("Could not extract the bundled FSR runtime to {}", dir, e);
-            return null;
-        }
-    }
-
-    private static boolean sameBytes(Path path, byte[] bytes) {
-        try {
-            return Files.size(path) == bytes.length && Arrays.equals(Files.readAllBytes(path), bytes);
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
-    private record PlatformNatives(String platformDir, String libraryName) {
-        private static PlatformNatives current() {
-            String os = System.getProperty("os.name", "").toLowerCase();
-            String arch = System.getProperty("os.arch", "").toLowerCase();
-            boolean x64 = arch.equals("x86_64") || arch.equals("amd64");
-            if (os.contains("win") && x64) {
-                return new PlatformNatives("windows-x64", "amd_fidelityfx_vk.dll");
-            }
-            if (os.contains("linux") && x64) {
-                return new PlatformNatives("linux-x64", "libamd_fidelityfx_vk.so");
-            }
-            return new PlatformNatives(os + "/" + arch, System.mapLibraryName("amd_fidelityfx_vk"));
-        }
-    }
 }

@@ -9,6 +9,9 @@
 	"caustica.options.rt.manualEv": "Exposición EV",
 	"caustica.options.rt.manualEv.tooltip": "Compensación de exposición en pasos. En Manual, es la exposición fija. En Automática, desplaza la exposición automática para aclararla u oscurecerla.",
 
+	"caustica.options.rt.gamma": "Gamma",
+	"caustica.options.rt.gamma.tooltip": "Gamma de luminancia posterior a la transformación. Los valores por debajo de 1,00 aclaran las sombras y los medios tonos sin alterar el negro, el blanco ni las proporciones de color.",
+
 	"caustica.options.rt.spp": "Muestras por píxel",
 	"caustica.options.rt.spp.tooltip": "Muestras de trazado de caminos tomadas por píxel en cada fotograma. Un valor más alto es más limpio, pero más exigente.",
 
@@ -37,8 +40,34 @@
 	"caustica.options.rt.hdr": "Salida HDR",
 	"caustica.options.rt.hdr.tooltip": "Recrea la cadena de intercambio para HDR (ST.2084/PQ) o salida SDR nativa. Se aplica en el siguiente límite de fotograma.",
 
+	"caustica.options.rt.hdrUiBrightness": "Brillo de la interfaz HDR",
+	"caustica.options.rt.hdrUiBrightness.tooltip": "Brillo absoluto (en nits) asignado a la interfaz creada para SDR en una pantalla HDR. BT.2408 sitúa el blanco de gráficos SDR en 203 nits; con un pico de 1000 nits, la transformación de salida HDR de ACES sitúa una superficie blanca de la escena cerca de 107 nits.",
+
 	"caustica.options.rt.hdrPeak": "Brillo máximo HDR",
 	"caustica.options.rt.hdrPeak.tooltip": "Brillo absoluto (en nits) hacia el que se atenúan las altas luces. Ajústalo al brillo HDR máximo de tu pantalla.",
+
+	"caustica.options.rt.denoiser": "Denoiser",
+	"caustica.options.rt.denoiser.tooltip": "Qué denoiser limpia la imagen trazada. Automático elige el mejor que pueda ejecutar este equipo. DLSS Ray Reconstruction necesita una GPU NVIDIA RTX, NRD necesita su biblioteca nativa, y el denoiser integrado siempre funciona pero es menos nítido porque no tiene historial de fotogramas. Desactivado muestra la imagen trazada sin procesar.",
+	"caustica.options.rt.denoiser.auto": "Automático",
+	"caustica.options.rt.denoiser.dlss-rr": "DLSS Ray Reconstruction",
+	"caustica.options.rt.denoiser.nrd": "NRD",
+	"caustica.options.rt.denoiser.builtin": "Integrado",
+	"caustica.options.rt.denoiser.off": "Desactivado",
+
+	"caustica.options.rt.superResolutionMethod": "Método de superresolución",
+	"caustica.options.rt.superResolutionMethod.tooltip": "Qué escalador lleva a tu pantalla la imagen en resolución de render. Automático usa FSR cuando su runtime está instalado y SGSR2 en caso contrario. Bilineal siempre funciona, pero es menos nítido.",
+	"caustica.options.rt.superResolutionMethod.auto": "Automático",
+	"caustica.options.rt.superResolutionMethod.fsr": "FSR",
+	"caustica.options.rt.superResolutionMethod.bilinear": "Bilineal",
+	"caustica.options.rt.superResolutionMethod.sgsr": "SGSR2 (Snapdragon)",
+	"caustica.options.rt.superResolutionMethod.sgsr.tooltip": "Snapdragon Game Super Resolution 2 de Qualcomm: reescalado temporal a partir de las mismas guías que usó el denoiser. Es solo compute, así que funciona en GPU sin runtime de FSR, incluidas las móviles.",
+	"caustica.options.rt.superResolution": "Superresolución",
+	"caustica.options.rt.superResolution.tooltip": "Resolución de render a la que se traza el mundo antes de escalarla a tu pantalla. Los modos bajos renderizan menos píxeles y escalan con más agresividad para lograr más fotogramas por segundo; los modos altos renderizan más píxeles para una imagen más nítida. DLSS Ray Reconstruction usa sus propios modos equivalentes.",
+	"caustica.options.rt.superResolution.0": "AA nativo / DLAA",
+	"caustica.options.rt.superResolution.1": "Calidad",
+	"caustica.options.rt.superResolution.2": "Equilibrado",
+	"caustica.options.rt.superResolution.3": "Rendimiento",
+	"caustica.options.rt.superResolution.4": "Ultra rendimiento",
 
 	"caustica.options.rt.debugView": "Vista de depuración",
 	"caustica.options.rt.debugView.tooltip": "Visualiza un búfer intermedio del trazado de rayos en lugar de la imagen final.",
@@ -49,5 +78,7 @@
 	"caustica.options.rt.debugView.4": "Rugosidad",
 	"caustica.options.rt.debugView.5": "Movimiento",
 	"caustica.options.rt.debugView.6": "Especular",
-	"caustica.options.rt.debugView.7": "Movimiento especular"
+	"caustica.options.rt.debugView.7": "Movimiento especular",
+	"caustica.options.rt.debugView.8": "Falso color de exposición",
+	"caustica.options.rt.debugView.9": "Peso de medición"
 }

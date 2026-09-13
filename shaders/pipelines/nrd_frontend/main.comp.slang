@@ -1,4 +1,6 @@
-// NRD front end: packs the renderer's guide buffers into the exact input layout NRD's REBLUR expects.
+// NRD front end: packs the renderer's guide buffers into the exact input layout NRD expects. Which
+// denoiser consumes them is the shim's choice — REBLUR where the device can run it, RELAX where it cannot
+// — and the one place the two disagree is how a radiance lane's hit distance is encoded.
 //
 // Every helper below is a port of the same-named function in NRD v4.17.3's Shaders/NRD.hlsli, evaluated
 // for the encodings the shim builds the library with: NRD_NORMAL_ENCODING = RGBA8_UNORM (0) and
@@ -53,6 +55,11 @@ float reblurHitDistanceNormalization(float viewZ, float3 hitDistParams, float ro
     float f = 1.0 - exp2(-200.0 * roughness * roughness);
     f *= pow(saturate(roughness), 0.5);
     return (hitDistParams.x + abs(viewZ) * hitDistParams.y) * lerp(hitDistParams.z, 1.0, f);
+}
+
+// NRD.hlsli:884-894 — RELAX's front end packs the distance as it is, sanitized only.
+float relaxHitDist(float hitDist) {
+    return !isnan(hitDist) && !isinf(hitDist) ? clamp(hitDist, 0.0, NRD_FP16_MAX) : 0.0;
 }
 
 // NRD.hlsli:774-782 — "0" means "lobe skipped", which is not the case when this is called.
@@ -114,15 +121,21 @@ void main(uint3 id : SV_DispatchThreadID) {
     outNormalRoughness[pix] = float4(n * 0.5 + 0.5, linearRoughness);
     outViewZ[pix] = viewZ;
 
-    // Hit distances are averaged world-space distances, so they need no per-lane roughness beyond the
-    // sample's convention: 1.0 for the diffuse lane, linear roughness for the specular lane.
-    float diffNorm = reblurNormHitDist(diff.a, viewZ, hitDistParams, 1.0);
-    float specNorm = reblurNormHitDist(spec.a, viewZ, hitDistParams, linearRoughness);
+    // Hit distances are averaged world-space distances. REBLUR rescales them through its own parameters,
+    // with roughness 1.0 on the diffuse lane and the linear roughness on the specular lane; RELAX takes
+    // them raw. The flag follows the denoiser the shim built.
+    bool normalize = pc.normalizeHitDistances != 0u;
+    float diffPackedHitDist = normalize
+            ? reblurNormHitDist(diff.a, viewZ, hitDistParams, 1.0)
+            : relaxHitDist(diff.a);
+    float specPackedHitDist = normalize
+            ? reblurNormHitDist(spec.a, viewZ, hitDistParams, linearRoughness)
+            : relaxHitDist(spec.a);
     // The lanes are radiance, so the material has to come out before the denoiser sees them; the back end
     // puts it back with the same factors. The pre-exposure stays in: dividing it out here would push
     // physical-unit radiance past fp16 as soon as a texel is dark.
     float3 diffDemod = nrdDemodFactor(gAlbedo.SampleLevel(uv, 0.0).rgb);
     float3 specDemod = nrdDemodFactor(gSpecAlbedo.SampleLevel(uv, 0.0).rgb);
-    outDiffRadianceHitDist[pix] = packRadianceAndNormHitDist(diff.rgb / diffDemod, diffNorm);
-    outSpecRadianceHitDist[pix] = packRadianceAndNormHitDist(spec.rgb / specDemod, specNorm);
+    outDiffRadianceHitDist[pix] = packRadianceAndNormHitDist(diff.rgb / diffDemod, diffPackedHitDist);
+    outSpecRadianceHitDist[pix] = packRadianceAndNormHitDist(spec.rgb / specDemod, specPackedHitDist);
 }

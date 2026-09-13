@@ -5,6 +5,7 @@ import dev.comfyfluffy.caustica.CausticaMod;
 import dev.comfyfluffy.caustica.rt.accel.RtImage;
 import dev.comfyfluffy.caustica.rt.ffx.FsrUpscaler;
 import dev.comfyfluffy.caustica.rt.pipeline.RtDenoisePipeline;
+import dev.comfyfluffy.caustica.rt.pipeline.RtSgsrUpscaler;
 import dev.comfyfluffy.caustica.rt.pipeline.RtDlssRr;
 import org.joml.Matrix4fc;
 import org.lwjgl.vulkan.VK10;
@@ -37,6 +38,8 @@ public final class RtRecon {
         /** The backend writes display resolution itself (DLSS Ray Reconstruction), or nothing upscales. */
         NONE,
         FSR,
+        /** Snapdragon Game Super Resolution 2: temporal, and pure compute, so it runs where FSR cannot. */
+        SGSR,
         BILINEAR,
     }
 
@@ -87,17 +90,24 @@ public final class RtRecon {
 
     /**
      * How the render-resolution result reaches display resolution. DLSS Ray Reconstruction denoises and
-     * upscales in a single feature, so it owns the upscale and this returns {@link Upscaler#NONE} there. A
-     * missing FSR runtime silently falls back to the built-in resolve rather than disabling the frame.
+     * upscales in a single feature, so it owns the upscale and this returns {@link Upscaler#NONE} there.
+     * {@code auto} prefers FSR where its runtime exists and SGSR2 everywhere else, so a missing FSR runtime
+     * still leaves a temporal upscaler in charge rather than the built-in resolve.
      */
     public Upscaler upscaler() {
         if (denoiser() == Denoiser.DLSS_RR) {
             return Upscaler.NONE;
         }
-        if ("bilinear".equals(CausticaConfig.Rt.Reconstruction.UPSCALER.get())) {
+        String configured = CausticaConfig.Rt.Reconstruction.UPSCALER.get();
+        if ("bilinear".equals(configured)) {
             return Upscaler.BILINEAR;
         }
-        return FsrUpscaler.INSTANCE.isAvailable() ? Upscaler.FSR : Upscaler.BILINEAR;
+        if ("sgsr".equals(configured)) {
+            return Upscaler.SGSR;
+        }
+        // auto: FSR's runtime is a Windows-only native library, so every other platform lands on SGSR2 —
+        // temporal and merely a compute pass, which beats the bilinear resolve it replaces.
+        return FsrUpscaler.INSTANCE.isAvailable() ? Upscaler.FSR : Upscaler.SGSR;
     }
 
     /** True when DLSS Ray Reconstruction owns the super-resolution mode ladder. */
@@ -111,7 +121,8 @@ public final class RtRecon {
      * exactly what the blit already does.
      */
     public boolean isActive() {
-        return denoiser() != Denoiser.OFF || upscaler() == Upscaler.FSR;
+        return denoiser() != Denoiser.OFF
+                || (upscaler() != Upscaler.BILINEAR && upscaler() != Upscaler.NONE);
     }
 
     /**
@@ -163,11 +174,14 @@ public final class RtRecon {
             case NRD -> ensureDenoise(renderWidth, renderHeight, displayWidth, displayHeight)
                     && RtNrd.INSTANCE.ensure(renderWidth, renderHeight, displayWidth, displayHeight);
             case BUILTIN -> ensureDenoise(renderWidth, renderHeight, displayWidth, displayHeight);
-            // No denoiser: only FSR has anything to set up, and it reads the raw trace directly, so the
-            // built-in pipeline and its scratch pair are not needed.
+            // No denoiser: only an upscaler has anything to set up, and both read the raw trace directly, so
+            // the built-in pipeline and its scratch pair are not needed.
             case OFF -> upscaler() == Upscaler.FSR
-                    && FsrUpscaler.INSTANCE.ensure(renderWidth, renderHeight, displayWidth, displayHeight,
-                            CausticaConfig.Rt.Reconstruction.QUALITY.value());
+                    ? FsrUpscaler.INSTANCE.ensure(renderWidth, renderHeight, displayWidth, displayHeight,
+                            CausticaConfig.Rt.Reconstruction.QUALITY.value())
+                    : upscaler() == Upscaler.SGSR
+                            && RtSgsrUpscaler.INSTANCE.ensure(renderWidth, renderHeight, displayWidth,
+                                    displayHeight);
         };
     }
 
@@ -221,8 +235,8 @@ public final class RtRecon {
                     viewToClip, worldPrevToWorld);
             case BUILTIN -> recordDenoise(cmd, color, depth, motion, normals, diffuseAlbedo, specularAlbedo,
                     out, renderWidth, renderHeight, displayWidth, displayHeight, jitterX, jitterY, viewToClip);
-            case OFF -> recordUpscaleOnly(cmd, color, depth, motion, out, renderWidth, renderHeight,
-                    displayWidth, displayHeight, jitterX, jitterY, viewToClip);
+            case OFF -> recordUpscaleOnly(cmd, color, depth, motion, diffuseAlbedo, out, renderWidth,
+                    renderHeight, displayWidth, displayHeight, jitterX, jitterY, viewToClip);
         };
     }
 
@@ -232,23 +246,31 @@ public final class RtRecon {
      * keeps that path in charge.
      */
     private boolean recordUpscaleOnly(VkCommandBuffer cmd, RtImage color, RtImage depth, RtImage motion,
-                                      RtImage out, int renderWidth, int renderHeight,
+                                      RtImage diffuseAlbedo, RtImage out, int renderWidth, int renderHeight,
                                       int displayWidth, int displayHeight, float jitterX, float jitterY,
                                       Matrix4fc viewToClip) {
-        if (upscaler() != Upscaler.FSR) {
+        if (upscaler() == Upscaler.BILINEAR || upscaler() == Upscaler.NONE) {
             return false;
         }
         try {
-            if (!FsrUpscaler.INSTANCE.ensure(renderWidth, renderHeight, displayWidth, displayHeight,
-                    CausticaConfig.Rt.Reconstruction.QUALITY.value())) {
+            if (!ensureOffPathUpscaler(renderWidth, renderHeight, displayWidth, displayHeight)) {
                 return false;
             }
-            return dispatchFsr(cmd, color, depth, motion, out, renderWidth, renderHeight,
+            return dispatchUpscaler(cmd, color, depth, motion, diffuseAlbedo, out, renderWidth, renderHeight,
                     displayWidth, displayHeight, jitterX, jitterY, viewToClip);
         } catch (Throwable t) {
-            CausticaMod.LOGGER.error("FSR upscaling of the raw trace failed; falling back to a blit", t);
+            CausticaMod.LOGGER.error("Upscaling of the raw trace failed; falling back to a blit", t);
             return false;
         }
+    }
+
+    private boolean ensureOffPathUpscaler(int renderWidth, int renderHeight, int displayWidth,
+                                          int displayHeight) {
+        if (upscaler() == Upscaler.FSR) {
+            return FsrUpscaler.INSTANCE.ensure(renderWidth, renderHeight, displayWidth, displayHeight,
+                    CausticaConfig.Rt.Reconstruction.QUALITY.value());
+        }
+        return RtSgsrUpscaler.INSTANCE.ensure(renderWidth, renderHeight, displayWidth, displayHeight);
     }
 
     /**
@@ -274,11 +296,9 @@ public final class RtRecon {
                     worldToView, viewToClip, worldPrevToWorld)) {
                 return false;
             }
-            if (upscaler() == Upscaler.FSR
-                    && FsrUpscaler.INSTANCE.ensure(renderWidth, renderHeight, displayWidth, displayHeight,
-                            CausticaConfig.Rt.Reconstruction.QUALITY.value())
-                    && dispatchFsr(cmd, denoisePing, depth, motion, out, renderWidth, renderHeight,
-                            displayWidth, displayHeight, jitterX, jitterY, viewToClip)) {
+            if (upscaler() != Upscaler.BILINEAR && upscaler() != Upscaler.NONE
+                    && dispatchUpscaler(cmd, denoisePing, depth, motion, diffuseAlbedo, out, renderWidth,
+                            renderHeight, displayWidth, displayHeight, jitterX, jitterY, viewToClip)) {
                 return true;
             }
             denoise.recordResolve(cmd, renderWidth, renderHeight, displayWidth, displayHeight,
@@ -300,13 +320,12 @@ public final class RtRecon {
         }
         try {
             denoise.setImages(color, denoisePing, denoisePong, out, depth, normals, diffuseAlbedo, specularAlbedo);
-            if (upscaler() == Upscaler.FSR
-                    && FsrUpscaler.INSTANCE.ensure(renderWidth, renderHeight, displayWidth, displayHeight,
-                            CausticaConfig.Rt.Reconstruction.QUALITY.value())) {
+            if (upscaler() != Upscaler.BILINEAR && upscaler() != Upscaler.NONE) {
+                // Both upscalers need the spatial iterations' result, not the raw trace.
                 denoise.recordIterations(cmd, renderWidth, renderHeight, displayWidth, displayHeight,
                         viewToClip.m22(), viewToClip.m32());
-                if (dispatchFsr(cmd, denoisePing, depth, motion, out, renderWidth, renderHeight,
-                        displayWidth, displayHeight, jitterX, jitterY, viewToClip)) {
+                if (dispatchUpscaler(cmd, denoisePing, depth, motion, diffuseAlbedo, out, renderWidth,
+                        renderHeight, displayWidth, displayHeight, jitterX, jitterY, viewToClip)) {
                     return true;
                 }
             }
@@ -320,13 +339,38 @@ public final class RtRecon {
         }
     }
 
-    /** Record FSR over a render-resolution image. False leaves the caller on its own resolve or blit. */
-    private boolean dispatchFsr(VkCommandBuffer cmd, RtImage source, RtImage depth, RtImage motion, RtImage out,
-                                int renderWidth, int renderHeight, int displayWidth, int displayHeight,
-                                float jitterX, float jitterY, Matrix4fc viewToClip) {
-        return FsrUpscaler.INSTANCE.dispatch(cmd, source, depth, motion, out,
-                renderWidth, renderHeight, displayWidth, displayHeight,
-                jitterX, jitterY, viewToClip.m11(), viewToClip.m22(), viewToClip.m32());
+    /**
+     * Record the configured upscaler over a render-resolution image. False leaves the caller on its own
+     * resolve or blit. FSR is a native feature that reprojects from the projection itself; SGSR2 is shader
+     * passes that take the same guides the denoiser used plus the emissive guide as its reactive mask.
+     */
+    private boolean dispatchUpscaler(VkCommandBuffer cmd, RtImage source, RtImage depth, RtImage motion,
+                                     RtImage diffuseAlbedo, RtImage out, int renderWidth, int renderHeight,
+                                     int displayWidth, int displayHeight, float jitterX, float jitterY,
+                                     Matrix4fc viewToClip) {
+        return switch (upscaler()) {
+            case SGSR -> RtSgsrUpscaler.INSTANCE.ensure(renderWidth, renderHeight, displayWidth, displayHeight)
+                    && RtSgsrUpscaler.INSTANCE.dispatch(cmd, source, depth, motion, diffuseAlbedo, out,
+                            jitterX, jitterY, viewToClip);
+            case FSR -> FsrUpscaler.INSTANCE.dispatch(cmd, source, depth, motion, out,
+                    renderWidth, renderHeight, displayWidth, displayHeight,
+                    jitterX, jitterY, viewToClip.m11(), viewToClip.m22(), viewToClip.m32());
+            case NONE, BILINEAR -> false;
+        };
+    }
+
+    /**
+     * Invalidate the upscalers' accumulated history. Called when the renderer's state is invalidated (world
+     * reload, resize, resource reload): reprojecting history across a discontinuity is exactly the ghosting
+     * a temporal upscaler has to be told about.
+     */
+    public void requestUpscalerReset() {
+        RtSgsrUpscaler.INSTANCE.requestReset();
+    }
+
+    /** Drop a latched upscaler failure so the next frame retries it; the renderer's recovery hook calls this. */
+    public void clearUpscalerFailure() {
+        RtSgsrUpscaler.INSTANCE.clearFailure();
     }
 
     /** The path tracer's per-lobe radiance lanes, needed only while the NRD backend is active. */
@@ -344,6 +388,7 @@ public final class RtRecon {
         RtDlssRr.INSTANCE.destroy();
         RtNrd.INSTANCE.destroy();
         FsrUpscaler.INSTANCE.destroy();
+        RtSgsrUpscaler.INSTANCE.destroy();
         if (denoise != null) {
             denoise.destroy();
             denoise = null;

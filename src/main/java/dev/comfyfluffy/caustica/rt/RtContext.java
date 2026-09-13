@@ -131,16 +131,28 @@ public final class RtContext {
             PointerBuffer pVma = stack.mallocPointer(1);
             check(Vma.vmaCreateAllocator(aci, pVma), "vmaCreateAllocator(RT)");
 
-            // RT pipeline limits for SBT layout.
-            VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps = VkPhysicalDeviceRayTracingPipelinePropertiesKHR
-                    .calloc(stack).sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR);
+            // RT pipeline limits for SBT layout. A ray-query-only device never enabled the pipeline
+            // extension, so its properties struct stays out of the query chain (the SBT fields are unused
+            // on that backend). The descriptor-indexing struct is read on every backend — it carries the
+            // update-after-bind combined-sampler limit the bindless texture set is sized against — so it
+            // must stay at the tail of the chain whichever struct precedes it.
             VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps =
                     VkPhysicalDeviceAccelerationStructurePropertiesKHR.calloc(stack).sType$Default();
             VkPhysicalDeviceDescriptorIndexingProperties descriptorProps =
                     VkPhysicalDeviceDescriptorIndexingProperties.calloc(stack).sType$Default();
-            rtProps.pNext(asProps.address());
+            VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps =
+                    VkPhysicalDeviceRayTracingPipelinePropertiesKHR
+                            .calloc(stack).sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR);
+            boolean sbtBackend = RtDeviceBringup.worldBackend()
+                    == RtDeviceBringup.WorldBackend.RAY_TRACING_PIPELINE;
             asProps.pNext(descriptorProps.address());
-            VkPhysicalDeviceProperties2 props2 = VkPhysicalDeviceProperties2.calloc(stack).sType$Default().pNext(rtProps.address());
+            VkPhysicalDeviceProperties2 props2 = VkPhysicalDeviceProperties2.calloc(stack).sType$Default();
+            if (sbtBackend) {
+                rtProps.pNext(asProps.address());
+                props2.pNext(rtProps.address());
+            } else {
+                props2.pNext(asProps.address());
+            }
             VK12.vkGetPhysicalDeviceProperties2(phys, props2);
 
             var limits = props2.properties().limits();
@@ -154,6 +166,15 @@ public final class RtContext {
                     descriptorProps.maxDescriptorSetUpdateAfterBindSamplers(),
                     descriptorProps.maxDescriptorSetUpdateAfterBindSampledImages(),
                     descriptorProps.maxUpdateAfterBindDescriptorsInAllPools());
+
+            // The bindless texture set is sized against this limit, so a zero means the descriptor-indexing
+            // struct never reached the driver — its pNext link was dropped, or the query ran on a device
+            // that cannot have passed the RT feature gate. Failing here says so, instead of surfacing later
+            // as a bindless capacity error that blames the configured texture count.
+            if (combinedImageSamplerLimit == 0) {
+                throw new IllegalStateException("VkPhysicalDeviceDescriptorIndexingProperties returned no "
+                        + "descriptor limits; the world pass cannot size its bindless texture set");
+            }
 
             CausticaMod.LOGGER.info(
                     "RT portability limits: SBT handleAlignment={}, baseAlignment={}, maxStride={}; "
@@ -523,8 +544,28 @@ public final class RtContext {
         }
     }
 
+    /**
+     * Bounded idle wait for teardown. Prefer this wherever the caller is shutting down: a device-wide wait
+     * cannot be given a deadline, and after shutdown starts the frames whose completion it would wait for are
+     * never submitted. False means the RT module's own submitted work did not finish in time; the caller then
+     * leaves the GPU resources alone instead of freeing them under the GPU.
+     */
+    public boolean waitIdleBounded(long timeoutMillis) {
+        return gpuExecutor == null || gpuExecutor.awaitIdleBounded(timeoutMillis);
+    }
+
     public void destroy() {
         gpuExecutor.shutdown();
+        if (gpuExecutor.abandoned()) {
+            // The executor never stopped, or its GPU work never completed: its command pool, timelines and
+            // every allocation made through this context may still be referenced by work in flight. Freeing
+            // them here would be use-after-free, and the process is exiting anyway.
+            CausticaMod.LOGGER.warn("RT shutdown: leaving the RT device objects to process exit "
+                    + "(executor did not stop cleanly)");
+            instance = null;
+            unavailable = false;
+            return;
+        }
         if (commandPool != 0L) {
             VK10.vkDestroyCommandPool(vk, commandPool, null);
             commandPool = 0L;

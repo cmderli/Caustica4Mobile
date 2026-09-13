@@ -1,5 +1,7 @@
 package dev.comfyfluffy.caustica.rt;
 
+import dev.comfyfluffy.caustica.CausticaMod;
+
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vulkan.VulkanCommandEncoder;
 import com.mojang.blaze3d.vulkan.VulkanQueue;
@@ -31,6 +33,7 @@ import java.util.function.Consumer;
 
 import static org.lwjgl.vulkan.KHRSynchronization2.VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
 import static org.lwjgl.vulkan.KHRSynchronization2.VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT_KHR;
+import static org.lwjgl.vulkan.KHRSynchronization2.VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
 import static org.lwjgl.vulkan.KHRSynchronization2.VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
 
 /**
@@ -42,14 +45,28 @@ public final class RtGpuExecutor {
     private static final int MAX_BUILD_BATCH = 32;
     private static final Job STOP = new Job(null, null, null, null, null);
     private static final Job WAKE = new Job(null, null, null, null, null);
+    // Stages that consume what an asynchronous terrain build publishes: the acceleration-structure builds
+    // that chain onto it, and the world pass itself — a ray-tracing dispatch, or the ray-query compute
+    // dispatch that replaces it on devices without a ray-tracing pipeline.
     private static final long TERRAIN_READ_STAGES =
             VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
-                    | VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+                    | VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR
+                    | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
 
     private final RtContext ctx;
     private final VulkanQueue computeQueue;
     private final long buildTimeline;
+    /**
+     * Frame-path bound for a timeline wait. Long enough that ordinary load never reaches it (a frame's work
+     * is milliseconds), short enough that a wedged queue degrades the renderer instead of freezing the client.
+     */
+    private static final long FRAME_WAIT_TIMEOUT_MILLIS = 10_000L;
+
+    /** Bound for a build this executor submitted itself; also what stops its thread from wedging shutdown. */
+    private static final long BUILD_WAIT_TIMEOUT_MILLIS = 10_000L;
+
     private final long graphicsTimeline;
+    private boolean destroysAbandoned;
     private final LinkedBlockingQueue<Job> jobs = new LinkedBlockingQueue<>();
     private final AtomicLong nextBuildValue = new AtomicLong();
     private final AtomicLong pendingPublishWaitValue = new AtomicLong();
@@ -178,8 +195,56 @@ public final class RtGpuExecutor {
         }
     }
 
+    /**
+     * Bounded equivalent of the caller's device-idle wait, used by teardown.
+     *
+     * <p>It waits on this module's own two timelines rather than the whole device: a device-wide wait cannot
+     * be interrupted, while these two cover every command the RT path has submitted (frame work signals the
+     * graphics timeline at the end of Minecraft's own submission, async builds signal their own). Values are
+     * re-read after each wait so work submitted while waiting is included too.
+     */
+    public boolean awaitIdleBounded(long timeoutMillis) {
+        long deadline = System.nanoTime() + timeoutMillis * 1_000_000L;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            long graphicsValue = queryTimeline(graphicsTimeline);
+            long buildValue = queryTimeline(buildTimeline);
+            if (!waitTimeline(graphicsTimeline, graphicsValue, remainingMillis(deadline))
+                    || !waitTimeline(buildTimeline, buildValue, remainingMillis(deadline))) {
+                return false;
+            }
+            if (queryTimeline(graphicsTimeline) == graphicsValue && queryTimeline(buildTimeline) == buildValue) {
+                return true;
+            }
+        }
+        return true;
+    }
+
+    private static long remainingMillis(long deadlineNanos) {
+        return Math.max((deadlineNanos - System.nanoTime()) / 1_000_000L, 1L);
+    }
+
+    /**
+     * Drops queued destruction after a timed-out idle wait. Their resources are still referenced by GPU work
+     * that never completed, so freeing them would be use-after-free; leaking them until process exit is the
+     * only safe option left.
+     */
+    public void abandonPendingDestroys() {
+        int abandoned;
+        synchronized (destroyJobs) {
+            abandoned = destroyJobs.size();
+            destroyJobs.clear();
+        }
+        destroysAbandoned = true;
+        if (abandoned > 0) {
+            CausticaMod.LOGGER.warn("RT shutdown: abandoned {} queued GPU resource destruction", abandoned);
+        }
+    }
+
     /** Caller has made the device idle; all queued destruction is now unconditionally safe. */
     public void flushDestroysAfterDeviceIdle() {
+        if (destroysAbandoned) {
+            return;
+        }
         Throwable failure = executorFailure;
         synchronized (destroyJobs) {
             for (DestroyJob job : destroyJobs) {
@@ -200,22 +265,37 @@ public final class RtGpuExecutor {
         }
     }
 
+    /** True when shutdown gave up on this executor, so its command pool and timelines must not be freed. */
+    public synchronized boolean abandoned() {
+        return thread.isAlive() || destroysAbandoned;
+    }
+
     public synchronized void shutdown() {
         if (closed) {
             return;
         }
         closed = true;
         jobs.add(STOP);
+        // Stop and join first, but never without a bound: a thread parked on a timeline wait cannot be
+        // interrupted out of it, and a client that never finishes stopping is killed by Minecraft's own
+        // shutdown watchdog instead.
         try {
-            thread.join();
+            thread.join(RtShutdown.remainingMillis());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while stopping RT GPU executor", e);
         }
-        // Stop and join first: waiting idle before the executor stops leaves a race where it can
-        // submit immediately after vkDeviceWaitIdle returns. The idle wait also makes graphics-side
-        // timeline semaphore use complete before those semaphores are destroyed below.
-        ctx.waitIdle();
+        if (thread.isAlive()) {
+            thread.interrupt();
+            RtShutdown.timeout("RT GPU executor stop", "its command pool and timelines are left alive");
+            return;
+        }
+        // The idle wait makes graphics-side timeline semaphore use complete before those semaphores are
+        // destroyed below; on expiry the same resources are left to process exit instead.
+        if (!awaitIdleBounded(RtShutdown.remainingMillis())) {
+            RtShutdown.timeout("RT GPU idle wait", "queued frees, the command pool and the timelines are left alive");
+            abandonPendingDestroys();
+            return;
+        }
         Throwable failure = null;
         try {
             flushDestroysAfterDeviceIdle();
@@ -426,7 +506,10 @@ public final class RtGpuExecutor {
             }
             VulkanDiagnostics.setInFlight("async-compute",
                     "submitted builds=" + firstValue + ".." + signalValue + " batch=" + batch.size());
-            waitTimeline(buildTimeline, signalValue);
+            if (!waitTimeline(buildTimeline, signalValue, BUILD_WAIT_TIMEOUT_MILLIS)) {
+                throw new IllegalStateException("RT GPU build " + signalValue + " did not complete within "
+                        + BUILD_WAIT_TIMEOUT_MILLIS + " ms");
+            }
             completed = true;
             VulkanDiagnostics.breadcrumb("async-compute completed buildTimeline=" + signalValue);
         } finally {
@@ -477,13 +560,26 @@ public final class RtGpuExecutor {
         }
     }
 
-    private void waitTimeline(long semaphore, long value) {
+    /**
+     * Waits for the timeline to reach {@code value}, bounded by {@code timeoutMillis}.
+     *
+     * <p>Infinite waits are what turn a wedged queue into a frozen client, and during shutdown they can wait
+     * on a signal that will never come at all: frames stop being submitted the moment shutdown starts, so a
+     * graphics value reserved by the last frame may never be signalled. Callers get a false return instead
+     * and decide what to abandon.
+     */
+    private boolean waitTimeline(long semaphore, long value, long timeoutMillis) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkSemaphoreWaitInfo wi = VkSemaphoreWaitInfo.calloc(stack).sType$Default()
                     .semaphoreCount(1)
                     .pSemaphores(stack.longs(semaphore))
                     .pValues(stack.longs(value));
-            RtContext.check(VK12.vkWaitSemaphores(ctx.vk(), wi, Long.MAX_VALUE), "vkWaitSemaphores(RT GPU executor)");
+            int result = VK12.vkWaitSemaphores(ctx.vk(), wi, timeoutMillis * 1_000_000L);
+            if (result == VK10.VK_TIMEOUT) {
+                return false;
+            }
+            RtContext.check(result, "vkWaitSemaphores(RT GPU executor)");
+            return true;
         }
     }
 
@@ -551,7 +647,17 @@ public final class RtGpuExecutor {
                 return false;
             }
             checkExecutorFailure();
-            waitTimeline(graphicsTimeline, requiredValue);
+            if (!waitTimeline(graphicsTimeline, requiredValue, FRAME_WAIT_TIMEOUT_MILLIS)) {
+                // The frame that reserved this value was never submitted, or the queue stopped completing
+                // work. Either way the resource this call guards cannot be reused safely, and the two
+                // alternatives are both worse than degrading: waiting forever freezes the client, and
+                // throwing takes it down. The RT path is switched off and this frame is drawn any way.
+                CausticaMod.LOGGER.error("RT graphics timeline did not reach {} within {} ms; "
+                        + "disabling the RT path for this session", requiredValue, FRAME_WAIT_TIMEOUT_MILLIS);
+                RtComposite.INSTANCE.latchOff("graphics timeline wait timed out at " + requiredValue);
+                completedValue = requiredValue;
+                return true;
+            }
             completedValue = requiredValue;
             return true;
         }

@@ -9,6 +9,9 @@
 	"caustica.options.rt.manualEv": "露出 EV",
 	"caustica.options.rt.manualEv.tooltip": "露出補正を段数で指定します。手動では固定露出として使い、自動では自動露出を明るくまたは暗く補正します。",
 
+	"caustica.options.rt.gamma": "ガンマ",
+	"caustica.options.rt.gamma.tooltip": "変換後の輝度ガンマ。1.00 未満の値は黒・白・色の比率を保ったまま、影と中間調を明るくします。",
+
 	"caustica.options.rt.spp": "ピクセルあたりのサンプル数",
 	"caustica.options.rt.spp.tooltip": "各フレームでピクセルごとに取得するパストレーシングサンプル数。高いほどきれいですが負荷が増えます。",
 
@@ -37,8 +40,34 @@
 	"caustica.options.rt.hdr": "HDR 出力",
 	"caustica.options.rt.hdr.tooltip": "HDR (ST.2084/PQ) またはネイティブ SDR 出力用にスワップチェーンを再作成します。次のフレーム境界で適用されます。",
 
+	"caustica.options.rt.hdrUiBrightness": "HDR UI の明るさ",
+	"caustica.options.rt.hdrUiBrightness.tooltip": "HDR ディスプレイ上で SDR 向け UI に割り当てる絶対輝度（nits）。BT.2408 は SDR グラフィックスの白を 203 nits とし、ピーク 1000 nits のとき ACES の HDR 出力変換はシーン内の白い面を約 107 nits に置きます。",
+
 	"caustica.options.rt.hdrPeak": "HDR ピーク輝度",
 	"caustica.options.rt.hdrPeak.tooltip": "ハイライトがロールオフする先の絶対輝度（nits）です。ディスプレイの HDR ピーク輝度に設定してください。",
+
+	"caustica.options.rt.denoiser": "デノイザー",
+	"caustica.options.rt.denoiser.tooltip": "パストレース画像をどのデノイザーで整えるかを選びます。自動はこの環境で実行できる最良のものを選びます。DLSS レイ再構成には NVIDIA RTX GPU、NRD には専用のネイティブライブラリが必要です。内蔵デノイザーは常に使えますが、フレーム履歴がないため滑らかさで劣ります。オフでは生のトレース画像を表示します。",
+	"caustica.options.rt.denoiser.auto": "自動",
+	"caustica.options.rt.denoiser.dlss-rr": "DLSS レイ再構成",
+	"caustica.options.rt.denoiser.nrd": "NRD",
+	"caustica.options.rt.denoiser.builtin": "内蔵",
+	"caustica.options.rt.denoiser.off": "オフ",
+
+	"caustica.options.rt.superResolutionMethod": "超解像方式",
+	"caustica.options.rt.superResolutionMethod.tooltip": "レンダリング解像度の画像を画面に届けるアップスケーラーを選びます。自動は FSR ランタイムがあれば FSR を、なければ SGSR2 を使います。バイリニアは常に動きますが滑らかさで劣ります。",
+	"caustica.options.rt.superResolutionMethod.auto": "自動",
+	"caustica.options.rt.superResolutionMethod.fsr": "FSR",
+	"caustica.options.rt.superResolutionMethod.bilinear": "バイリニア",
+	"caustica.options.rt.superResolutionMethod.sgsr": "SGSR2（Snapdragon）",
+	"caustica.options.rt.superResolutionMethod.sgsr.tooltip": "Qualcomm の Snapdragon Game Super Resolution 2。デノイザーと同じガイドを使う時間方向アップスケールです。コンピュートのみで動くため、FSR ランタイムのない GPU（モバイルを含む）でも利用できます。",
+	"caustica.options.rt.superResolution": "超解像",
+	"caustica.options.rt.superResolution.tooltip": "世界をどのレンダリング解像度でトレースし、画面へ拡大するかを決めます。低いモードほど画素数が減って拡大が強くなりフレームレートが上がり、高いモードほど画素数が増えて画像が鮮明になります。DLSS レイ再構成は独自の同等モードを使います。",
+	"caustica.options.rt.superResolution.0": "ネイティブ AA / DLAA",
+	"caustica.options.rt.superResolution.1": "クオリティ",
+	"caustica.options.rt.superResolution.2": "バランス",
+	"caustica.options.rt.superResolution.3": "パフォーマンス",
+	"caustica.options.rt.superResolution.4": "ウルトラパフォーマンス",
 
 	"caustica.options.rt.debugView": "デバッグ表示",
 	"caustica.options.rt.debugView.tooltip": "最終画像の代わりに、レイトレーシングの中間バッファを可視化します。",
@@ -49,5 +78,7 @@
 	"caustica.options.rt.debugView.4": "粗さ",
 	"caustica.options.rt.debugView.5": "モーション",
 	"caustica.options.rt.debugView.6": "スペキュラー",
-	"caustica.options.rt.debugView.7": "スペキュラーモーション"
+	"caustica.options.rt.debugView.7": "スペキュラーモーション",
+	"caustica.options.rt.debugView.8": "露出フォルスカラー",
+	"caustica.options.rt.debugView.9": "測光ウェイト"
 }

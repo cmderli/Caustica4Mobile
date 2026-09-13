@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class CausticaConfigTest {
     /**
@@ -39,6 +40,23 @@ final class CausticaConfigTest {
         } finally {
             angle.set(previousAngle);
             enabled.set(previousEnabled);
+        }
+    }
+
+    /** The upscaler setting accepts SGSR2 and the cycle button offers it, since both come from one list. */
+    @Test
+    void upscalerAcceptsSgsr2AndRejectsUnknownValues() {
+        CausticaConfig.StringSetting upscaler = CausticaConfig.Rt.Reconstruction.UPSCALER;
+        String previous = upscaler.get();
+        try {
+            upscaler.set("sgsr");
+            assertEquals("sgsr", upscaler.get());
+            assertTrue(CausticaConfig.Rt.Reconstruction.UPSCALERS.contains("sgsr"));
+
+            upscaler.set("nonsense");
+            assertEquals("auto", upscaler.get());
+        } finally {
+            upscaler.set(previous);
         }
     }
 

@@ -155,14 +155,19 @@ abstract class CompileShaders extends DefaultTask {
 			def base = outBase(srcDir.get().asFile, src)
 			def spv = new File(scratchDir, "${base}.spv")
 			def worldIndirectRaygen = base == "pipelines/world/indirect.rgen"
+			// The world pass exists twice: as ray-tracing stages, and as ray-query compute dispatches for
+			// devices without VK_KHR_ray_tracing_pipeline. The ray-query sources share every module below
+			// the entry point and select their traversal with CAUSTICA_RAY_QUERY.
+			def worldRayQueryCompute = base.endsWith("_rq.comp")
 			if (worldIndirectRaygen) {
 				// Keep a capability-free TraceRay fallback for devices without EXT SER, and
 				// publish the reordered variant separately when the extension is available.
 				compileOneSlang(src, spv, [])
 				compileOneSlang(src, new File(scratchDir, "pipelines/world/indirect_ser.rgen.spv"),
 						["-DCAUSTICA_ENABLE_EXT_SER", "-capability", "spvShaderInvocationReorderEXT"])
+			} else if (worldRayQueryCompute) {
+				compileOneSlang(src, spv, ["-DCAUSTICA_RAY_QUERY"])
 			} else {
-				// Pass A intentionally uses ordinary TraceRay.
 				compileOneSlang(src, spv, [])
 			}
 		}
@@ -386,24 +391,54 @@ def currentNativePlatformDir = {
 	return os.name.toLowerCase(java.util.Locale.ROOT) + "/" + arch
 }
 def nrdShimIncludes = ["libcaustica_nrd.so", "caustica_nrd.dll"]
+// Cross-compiled shims (native/nrd_shim/build_cross.sh) land beside the host build, one directory per
+// platform, so the same task stages the host build and every cross build it finds.
+def nrdCrossRoot = layout.buildDirectory.dir("native/nrd_shim").get().asFile
+def nrdCrossShims = {
+	def found = [:]
+	nrdCrossRoot.eachDir { platformDir ->
+		if (platformDir.name == ngxShimConfig || platformDir.name.startsWith("build")) {
+			return
+		}
+		def files = fileTree(new File(platformDir, ngxShimConfig)) { include nrdShimIncludes }.files
+		if (!files.empty) {
+			found[platformDir.name] = files
+		}
+	}
+	found
+}
 def bundleNrdNatives = tasks.register("bundleNrdNatives") {
-	description = "Bundles a built NRD shim into the mod resources when one is present."
+	description = "Bundles every built NRD shim (host and cross-compiled) into the mod resources."
 	inputs.files(fileTree(nrdShimOutDir) { include nrdShimIncludes }).withPropertyName("nrdShim")
+	inputs.files({ nrdCrossShims().values().flatten() }).withPropertyName("nrdCrossShims").optional()
 	outputs.dir(nrdNativeGenRoot)
 	outputs.upToDateWhen { false }
 	doLast {
 		delete(nrdNativeGenRoot)
-		def platformDir = currentNativePlatformDir()
+		def staged = 0
 		def found = fileTree(nrdShimOutDir) { include nrdShimIncludes }.files
 		if (found.empty) {
-			logger.lifecycle("NRD shim not built in ${nrdShimOutDir}; packaging without it (NRD stays unavailable)")
-			return
+			logger.lifecycle("NRD shim not built in ${nrdShimOutDir}; packaging without a host shim")
+		} else {
+			def platformDir = currentNativePlatformDir()
+			copy {
+				from found
+				into new File(nrdNativeGenRoot.get().asFile, "caustica/natives/${platformDir}")
+			}
+			logger.lifecycle("Bundled NRD shim for ${platformDir}: ${found*.name.join(', ')}")
+			staged++
 		}
-		copy {
-			from found
-			into new File(nrdNativeGenRoot.get().asFile, "caustica/natives/${platformDir}")
+		nrdCrossShims().each { platform, files ->
+			copy {
+				from files
+				into new File(nrdNativeGenRoot.get().asFile, "caustica/natives/${platform}")
+			}
+			logger.lifecycle("Bundled NRD shim for ${platform}: ${files*.name.join(', ')}")
+			staged++
 		}
-		logger.lifecycle("Bundled NRD shim for ${platformDir}: ${found*.name.join(', ')}")
+		if (staged == 0) {
+			logger.lifecycle("No NRD shim found; NRD stays unavailable")
+		}
 	}
 }
 

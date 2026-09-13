@@ -22,7 +22,6 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 
 /**
  * NRD denoising backend for devices that cannot run DLSS Ray Reconstruction. The path tracer splits its
@@ -42,11 +41,12 @@ import java.util.Arrays;
 public final class RtNrd {
     public static final RtNrd INSTANCE = new RtNrd();
 
-    private static final PlatformNatives NATIVES = PlatformNatives.current();
+    private static final BundledNative NATIVE = new BundledNative("caustica-nrd", "caustica_nrd");
     /** Written as worldPrevToWorld on the first frame, where there is no history to reproject. */
     private static final Matrix4f ZERO_MATRIX = new Matrix4f().zero();
-    /** The shim's denoiser id for REBLUR in diffuse+specular mode. */
+    /** The shim's denoiser ids, in the order its ABI documents them. */
     private static final int DENOISER_REBLUR_DIFFUSE_SPECULAR = 0;
+    private static final int DENOISER_RELAX_DIFFUSE_SPECULAR = 1;
     // Depth range NRD normalizes against. The tracer's rays reach 10000 world units, so the range has to sit
     // above that: NRD skips every pixel whose view-Z magnitude leaves the range, and it never writes its
     // output for a pixel it skips, so a range below the tracer's reach would leave holes in that geometry.
@@ -95,29 +95,32 @@ public final class RtNrd {
     public boolean isAvailable() {
         if (!probeAttempted) {
             probeAttempted = true;
-            // REBLUR's blur/history passes run quad-derivative ops in compute, so a device created
-            // without that feature cannot host it at all; failing here keeps the shim out of a doomed
-            // pipeline build.
-            if (!RtDeviceBringup.nrdDerivativesCapable()) {
-                CausticaMod.LOGGER.info(
-                        "NRD unavailable: device lacks {} with computeDerivativeGroupQuads",
-                        RtDeviceBringup.NRD_DERIVATIVES_EXTENSION);
-                return false;
+            // Present is not the same as loadable: Android's linker refuses a library outside the app's
+            // namespace, which is what the external game directory is, so every candidate is tried and the
+            // first one that opens wins.
+            Path lastSeen = null;
+            Throwable lastFailure = null;
+            for (Path shim : NATIVE.candidates(CausticaConfig.Nrd.PATH.get())) {
+                if (!Files.isRegularFile(shim)) {
+                    continue;
+                }
+                lastSeen = shim;
+                try {
+                    lib = NrdLibrary.load(shim);
+                    available = true;
+                    CausticaMod.LOGGER.info("NRD denoising available (shim {}, {})", shim, denoiserLabel());
+                    break;
+                } catch (Throwable t) {
+                    lastFailure = t;
+                }
             }
-            Path shim = locateShim();
-            if (shim == null) {
+            if (!available && lastSeen == null) {
                 CausticaMod.LOGGER.info(
                         "NRD unavailable: {} not found (bundled natives, run/natives, or -Dcaustica.nrd.path)",
-                        NATIVES.shimName());
-                return false;
-            }
-            try {
-                lib = NrdLibrary.load(shim);
-                available = true;
-                CausticaMod.LOGGER.info("NRD denoising available (shim {})", shim);
-            } catch (Throwable t) {
+                        NATIVE.libraryName());
+            } else if (!available) {
                 CausticaMod.LOGGER.warn("NRD shim at {} could not be loaded; using the built-in denoiser",
-                        shim, t);
+                        lastSeen, lastFailure);
             }
         }
         return available;
@@ -171,6 +174,31 @@ public final class RtNrd {
         }
     }
 
+    /**
+     * Which NRD denoiser the shim builds. REBLUR is the one this backend was written against, but its
+     * Blur/HistoryFix/PostBlur passes issue quad operations from compute shaders, which Vulkan only allows
+     * with {@code VK_KHR_compute_shader_derivatives} and its {@code computeDerivativeGroupQuads} feature —
+     * absent on e.g. Adreno. RELAX uses no quad operations at all (verified against the SPIR-V the shim
+     * embeds), so a device without that extension gets RELAX instead of no denoiser.
+     */
+    static int denoiserId(boolean computeShaderDerivatives) {
+        return computeShaderDerivatives ? DENOISER_REBLUR_DIFFUSE_SPECULAR : DENOISER_RELAX_DIFFUSE_SPECULAR;
+    }
+
+    private int denoiserId() {
+        return denoiserId(RtDeviceBringup.nrdDerivativesCapable());
+    }
+
+    /** True when the selected denoiser expects the normalized hit-distance convention REBLUR defines. */
+    private boolean normalizeHitDistances() {
+        return denoiserId() == DENOISER_REBLUR_DIFFUSE_SPECULAR;
+    }
+
+    private String denoiserLabel() {
+        return denoiserId() == DENOISER_REBLUR_DIFFUSE_SPECULAR ? "REBLUR"
+                : "RELAX (no " + RtDeviceBringup.NRD_DERIVATIVES_EXTENSION + " on this device)";
+    }
+
     private boolean createInstance(int displayWidth, int displayHeight) {
         if (!(((GpuDeviceAccessor) RenderSystem.getDevice()).caustica$getBackend() instanceof VulkanDevice device)) {
             return false;
@@ -184,15 +212,15 @@ public final class RtNrd {
             MemorySegment info = arena.allocate(NrdLibrary.CREATE_INFO_BYTES, 8);
             NrdLibrary.putCreateInfo(info, device.vkDevice().address(),
                     device.vkDevice().getPhysicalDevice().address(), getDeviceProcAddr,
-                    renderWidth, renderHeight, DENOISER_REBLUR_DIFFUSE_SPECULAR);
+                    renderWidth, renderHeight, denoiserId());
             int rc = lib.create(info);
             if (rc != NrdLibrary.OK) {
                 failed = true;
                 CausticaMod.LOGGER.error("caustica_nrd_create failed: {}", NrdLibrary.describeReturn(rc));
                 return false;
             }
-            CausticaMod.LOGGER.info("NRD denoiser created: {}x{} render, {}x{} display",
-                    renderWidth, renderHeight, displayWidth, displayHeight);
+            CausticaMod.LOGGER.info("NRD denoiser created: {}x{} render, {}x{} display, {}",
+                    renderWidth, renderHeight, displayWidth, displayHeight, denoiserLabel());
             return true;
         }
     }
@@ -215,7 +243,7 @@ public final class RtNrd {
             pipelines.setImages(normals, depth, diffuseAlbedo, specularAlbedo, laneDiff, laneSpec,
                     normalRoughness, viewZ, diffIn, specIn, diffOut, specOut, out);
             pipelines.recordFrontend(cmd, renderWidth, renderHeight, viewToClip.m22(), viewToClip.m32(),
-                    HIT_DIST_A, HIT_DIST_B, HIT_DIST_C, DENOISING_RANGE);
+                    HIT_DIST_A, HIT_DIST_B, HIT_DIST_C, DENOISING_RANGE, normalizeHitDistances());
 
             viewToClip.invert(clipToView);
             worldToView.invert(viewToWorld);
@@ -312,74 +340,5 @@ public final class RtNrd {
             image.destroy();
         }
         return null;
-    }
-
-    private static Path locateShim() {
-        String override = CausticaConfig.Nrd.PATH.get();
-        if (override != null && !override.isBlank()) {
-            Path path = Path.of(override);
-            if (Files.isDirectory(path)) {
-                path = path.resolve(NATIVES.shimName());
-            }
-            return Files.isRegularFile(path) ? path : null;
-        }
-        Path bundled = extractBundledShim();
-        if (bundled != null) {
-            return bundled;
-        }
-        Path gameDir = FabricLoader.getInstance().getGameDir();
-        Path[] candidates = {
-                gameDir.resolve("natives").resolve(NATIVES.shimName()),
-                gameDir.resolve(NATIVES.shimName())};
-        for (Path candidate : candidates) {
-            if (Files.isRegularFile(candidate)) {
-                return candidate;
-            }
-        }
-        return null;
-    }
-
-    private static Path extractBundledShim() {
-        Path dir = FabricLoader.getInstance().getGameDir().resolve("caustica-nrd")
-                .resolve("natives").resolve(NATIVES.platformDir());
-        Path shim = dir.resolve(NATIVES.shimName());
-        String resource = "/caustica/natives/" + NATIVES.platformDir() + "/" + NATIVES.shimName();
-        try (InputStream in = RtNrd.class.getResourceAsStream(resource)) {
-            if (in == null) {
-                return null;
-            }
-            byte[] bytes = in.readAllBytes();
-            Files.createDirectories(dir);
-            if (!Files.isRegularFile(shim) || !sameBytes(shim, bytes)) {
-                Files.write(shim, bytes);
-            }
-            return shim;
-        } catch (IOException e) {
-            CausticaMod.LOGGER.warn("Could not extract the NRD native shim to {}", dir, e);
-            return null;
-        }
-    }
-
-    private static boolean sameBytes(Path path, byte[] bytes) {
-        try {
-            return Files.size(path) == bytes.length && Arrays.equals(Files.readAllBytes(path), bytes);
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
-    private record PlatformNatives(String platformDir, String shimName) {
-        private static PlatformNatives current() {
-            String os = System.getProperty("os.name", "").toLowerCase();
-            String arch = System.getProperty("os.arch", "").toLowerCase();
-            boolean x64 = arch.equals("x86_64") || arch.equals("amd64");
-            if (os.contains("win") && x64) {
-                return new PlatformNatives("windows-x64", "caustica_nrd.dll");
-            }
-            if (os.contains("linux") && x64) {
-                return new PlatformNatives("linux-x64", "libcaustica_nrd.so");
-            }
-            return new PlatformNatives(os + "/" + arch, System.mapLibraryName("caustica_nrd"));
-        }
     }
 }

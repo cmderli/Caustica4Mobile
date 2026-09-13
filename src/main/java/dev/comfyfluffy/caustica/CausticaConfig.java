@@ -117,9 +117,14 @@ public final class CausticaConfig {
         FILE.setComment("reconstruction",
                 " Denoising and super resolution for the ray-traced image.\n"
                         + " denoiser is auto, dlss-rr, nrd, builtin, or off.\n"
-                        + " upscaler is auto, fsr, or bilinear (DLSS Ray Reconstruction upscales by itself).\n"
+                        + " upscaler is auto, fsr, sgsr, or bilinear (DLSS Ray Reconstruction upscales by itself).\n"
                         + " quality is the super resolution mode: 0 native-aa, 1 quality, 2 balanced,\n"
                         + " 3 performance, 4 ultra-performance.");
+        FILE.setComment("traversal",
+                " How the world pass traverses the scene. auto uses the ray-tracing pipeline where the device\n"
+                        + " exposes VK_KHR_ray_tracing_pipeline and falls back to ray queries elsewhere (Qualcomm\n"
+                        + " Adreno and other devices without the pipeline extension); ray-query forces the inline\n"
+                        + " backend on hardware that could run either. Applied at startup.");
     }
 
     private static Path resolveConfigPath() {
@@ -607,6 +612,32 @@ public final class CausticaConfig {
             }
         }
 
+        /**
+         * Which traversal the world pass runs on. {@code auto} uses the ray-tracing pipeline wherever the
+         * device exposes it and falls back to ray queries elsewhere, which is what devices without
+         * {@code VK_KHR_ray_tracing_pipeline} (e.g. Qualcomm Adreno) need. {@code ray-query} forces the
+         * inline compute traversal even where the pipeline exists, so the fallback can be exercised on
+         * desktop hardware. Read once at {@code vkCreateDevice} time: the two backends enable different
+         * device features, so a change only takes effect on restart.
+         */
+        public static final class Traversal {
+            public static final List<String> BACKENDS = List.of("auto", "ray-query");
+            public static final StringSetting BACKEND =
+                    string("caustica.rt.traversal", "traversal.backend", "auto", Traversal::sanitizeBackend);
+
+            private Traversal() {
+            }
+
+            private static String sanitizeBackend(String value) {
+                for (String backend : BACKENDS) {
+                    if (backend.equalsIgnoreCase(value)) {
+                        return backend;
+                    }
+                }
+                return "auto";
+            }
+        }
+
         public static final class Entities {
             public static final BooleanSetting ENABLED = bool("caustica.rt.entities", "entities.enabled", true);
             public static final BooleanSetting PARTICLES_ENABLED =
@@ -686,9 +717,10 @@ public final class CausticaConfig {
             /**
              * How the render-resolution result is scaled to the display. DLSS Ray Reconstruction denoises
              * and upscales in one feature, so it owns the upscale and this choice does not apply there.
-             * {@code auto} uses FSR when its runtime is present and the built-in resolve otherwise.
+             * {@code auto} uses FSR when its runtime is present and SGSR2 otherwise, which is what leaves
+             * the pure-compute upscaler in charge on platforms the FSR runtime does not cover.
              */
-            public static final List<String> UPSCALERS = List.of("auto", "fsr", "bilinear");
+            public static final List<String> UPSCALERS = List.of("auto", "fsr", "sgsr", "bilinear");
             public static final StringSetting UPSCALER =
                     string("caustica.rt.reconstruction.upscaler", "reconstruction.upscaler", "auto",
                             Reconstruction::sanitizeUpscaler);

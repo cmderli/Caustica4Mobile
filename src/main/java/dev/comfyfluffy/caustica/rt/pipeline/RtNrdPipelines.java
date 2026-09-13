@@ -335,7 +335,8 @@ public final class RtNrdPipelines {
 
     /** Pack this renderer's guides and lanes into NRD's inputs. */
     public void recordFrontend(VkCommandBuffer cmd, int width, int height, float projM22, float projM32,
-                               float hitDistA, float hitDistB, float hitDistC, float denoisingRange) {
+                               float hitDistA, float hitDistB, float hitDistC, float denoisingRange,
+                               boolean normalizeHitDistances) {
         try (MemoryStack stack = MemoryStack.stackPush();
              RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "nrd front end")) {
             VK10.vkCmdBindPipeline(cmd, VK10.VK_PIPELINE_BIND_POINT_COMPUTE, frontendPipeline);
@@ -343,7 +344,7 @@ public final class RtNrdPipelines {
                     stack.longs(frontendSet), null);
             ByteBuffer push = stack.malloc(NrdFrontendPushData.BYTE_SIZE);
             new NrdFrontendPushData(width, height, projM22, projM32, hitDistA, hitDistB, hitDistC,
-                    denoisingRange).write(push);
+                    denoisingRange, normalizeHitDistances ? 1 : 0).write(push);
             VK10.vkCmdPushConstants(cmd, frontendLayout, VK10.VK_SHADER_STAGE_COMPUTE_BIT, 0, push);
             VK10.vkCmdDispatch(cmd, (width + 7) / 8, (height + 7) / 8, 1);
             VulkanCommandEncoder.memoryBarrier(cmd, stack);

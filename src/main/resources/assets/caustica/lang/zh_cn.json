@@ -9,6 +9,9 @@
 	"caustica.options.rt.manualEv": "曝光 EV",
 	"caustica.options.rt.manualEv.tooltip": "以档位为单位的曝光补偿。手动模式下这是固定曝光；自动模式下会让自动曝光更亮或更暗。",
 
+	"caustica.options.rt.gamma": "伽马",
+	"caustica.options.rt.gamma.tooltip": "变换后的亮度伽马。低于 1.00 的值会提亮阴影和中间调，同时保持黑场、白场和颜色比例不变。",
+
 	"caustica.options.rt.spp": "每像素采样数",
 	"caustica.options.rt.spp.tooltip": "每帧对每个像素进行的路径追踪采样数。数值越高画面越干净，但负载也越高。",
 
@@ -37,8 +40,34 @@
 	"caustica.options.rt.hdr": "HDR 输出",
 	"caustica.options.rt.hdr.tooltip": "为 HDR (ST.2084/PQ) 或原生 SDR 输出重建交换链。在下一个帧边界生效。",
 
+	"caustica.options.rt.hdrUiBrightness": "HDR 界面亮度",
+	"caustica.options.rt.hdrUiBrightness.tooltip": "在 HDR 显示器上为 SDR 制作的界面分配的绝对亮度（nits）。BT.2408 将 SDR 图形白定在 203 nits；在 1000 nits 峰值下，ACES 的 HDR 输出变换会把场景中的白色表面放在约 107 nits。",
+
 	"caustica.options.rt.hdrPeak": "HDR 峰值亮度",
 	"caustica.options.rt.hdrPeak.tooltip": "高光回落目标的绝对亮度（nits）。请设为显示器的 HDR 峰值亮度。",
+
+	"caustica.options.rt.denoiser": "降噪器",
+	"caustica.options.rt.denoiser.tooltip": "用哪种降噪器清理路径追踪图像。自动会挑选本机可用的最佳方案。DLSS 光线重构需要 NVIDIA RTX 显卡；NRD 需要它的原生库；内置降噪器始终可用，但没有帧历史，因此画面更柔和。关闭则显示未降噪的原始追踪图像。",
+	"caustica.options.rt.denoiser.auto": "自动",
+	"caustica.options.rt.denoiser.dlss-rr": "DLSS 光线重构",
+	"caustica.options.rt.denoiser.nrd": "NRD",
+	"caustica.options.rt.denoiser.builtin": "内置",
+	"caustica.options.rt.denoiser.off": "关闭",
+
+	"caustica.options.rt.superResolutionMethod": "超分辨率方式",
+	"caustica.options.rt.superResolutionMethod.tooltip": "用哪种超分方式把渲染分辨率的图像送到屏幕。自动会在安装了 FSR 运行时时使用 FSR，否则使用 SGSR2。双线性始终可用，但画面更模糊。",
+	"caustica.options.rt.superResolutionMethod.auto": "自动",
+	"caustica.options.rt.superResolutionMethod.fsr": "FSR",
+	"caustica.options.rt.superResolutionMethod.bilinear": "双线性",
+	"caustica.options.rt.superResolutionMethod.sgsr": "SGSR2",
+	"caustica.options.rt.superResolutionMethod.sgsr.tooltip": "高通的 Snapdragon Game Super Resolution 2：用降噪器同样的引导缓冲做时域超分。纯计算着色器实现，因此在没有 FSR 运行时的 GPU（包括移动端）上也能用。",
+	"caustica.options.rt.superResolution": "超分辨率",
+	"caustica.options.rt.superResolution.tooltip": "世界以多高的渲染分辨率进行追踪，再缩放到屏幕。越低档位渲染的像素越少、缩放越激进，帧率更高；越高档位渲染的像素越多，画面更锐利。DLSS 光线重建使用自己的一套等效档位。",
+	"caustica.options.rt.superResolution.0": "原生 / DLAA",
+	"caustica.options.rt.superResolution.1": "质量",
+	"caustica.options.rt.superResolution.2": "平衡",
+	"caustica.options.rt.superResolution.3": "性能",
+	"caustica.options.rt.superResolution.4": "极致性能",
 
 	"caustica.options.rt.debugView": "调试视图",
 	"caustica.options.rt.debugView.tooltip": "显示光线追踪的中间缓冲区，而不是最终图像。",
@@ -49,5 +78,7 @@
 	"caustica.options.rt.debugView.4": "粗糙度",
 	"caustica.options.rt.debugView.5": "运动",
 	"caustica.options.rt.debugView.6": "高光",
-	"caustica.options.rt.debugView.7": "高光运动"
+	"caustica.options.rt.debugView.7": "高光运动",
+	"caustica.options.rt.debugView.8": "曝光伪色",
+	"caustica.options.rt.debugView.9": "测光权重"
 }

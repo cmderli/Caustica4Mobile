@@ -138,7 +138,7 @@ final class RtOpenExrWriter {
         OffsetDateTime now = OffsetDateTime.now();
         stringAttribute(bytes, "capDate", CAPTURE_DATE.format(now));
         floatAttribute(bytes, "utcOffset", now.getOffset().getTotalSeconds());
-        stringAttribute(bytes, "software", "Caustica");
+        stringAttribute(bytes, "software", "Caustica for Mobile");
         stringAttribute(bytes, "comments",
                 "Residual-exposed scene-linear ACEScg; before Look/LMT, ACES output transform, and UI");
         stringAttribute(bytes, "causticaColorSpace", "ACEScg (AP1/D60), scene-linear");

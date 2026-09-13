@@ -9,6 +9,9 @@
 	"caustica.options.rt.manualEv": "Экспозиция EV",
 	"caustica.options.rt.manualEv.tooltip": "Коррекция экспозиции в стопах. В ручном режиме это фиксированная экспозиция. В автоматическом режиме она сдвигает автоэкспозицию светлее или темнее.",
 
+	"caustica.options.rt.gamma": "Гамма",
+	"caustica.options.rt.gamma.tooltip": "Гамма яркости после преобразования. Значения ниже 1,00 осветляют тени и средние тона, сохраняя чёрный, белый и соотношения цветов.",
+
 	"caustica.options.rt.spp": "Сэмплов на пиксель",
 	"caustica.options.rt.spp.tooltip": "Сэмплы path tracing на пиксель в каждом кадре. Чем выше значение, тем чище изображение, но тем выше нагрузка.",
 
@@ -37,8 +40,34 @@
 	"caustica.options.rt.hdr": "Вывод HDR",
 	"caustica.options.rt.hdr.tooltip": "Пересоздаёт цепочку обмена для вывода HDR (ST.2084/PQ) или обычного SDR. Применяется на границе следующего кадра.",
 
+	"caustica.options.rt.hdrUiBrightness": "Яркость интерфейса HDR",
+	"caustica.options.rt.hdrUiBrightness.tooltip": "Абсолютная яркость (в нитах), назначаемая интерфейсу, созданному для SDR, на HDR-дисплее. BT.2408 задаёт белый цвет графики SDR на уровне 203 нит; при пике 1000 нит выходное HDR-преобразование ACES помещает белую поверхность в сцене примерно на 107 нит.",
+
 	"caustica.options.rt.hdrPeak": "Пиковая яркость HDR",
 	"caustica.options.rt.hdrPeak.tooltip": "Абсолютная яркость (в нитах), к которой сходятся яркие участки. Установите пиковую HDR-яркость вашего дисплея.",
+
+	"caustica.options.rt.denoiser": "Денойзер",
+	"caustica.options.rt.denoiser.tooltip": "Какой денойзер очищает изображение с трассировкой пути. Авто выбирает лучший из доступных на этой машине. DLSS Ray Reconstruction требует GPU NVIDIA RTX, NRD — свою нативную библиотеку, а встроенный денойзер работает всегда, но даёт более мягкую картинку, потому что у него нет истории кадров. Выкл. показывает необработанное трассированное изображение.",
+	"caustica.options.rt.denoiser.auto": "Авто",
+	"caustica.options.rt.denoiser.dlss-rr": "DLSS Ray Reconstruction",
+	"caustica.options.rt.denoiser.nrd": "NRD",
+	"caustica.options.rt.denoiser.builtin": "Встроенный",
+	"caustica.options.rt.denoiser.off": "Выкл.",
+
+	"caustica.options.rt.superResolutionMethod": "Метод суперразрешения",
+	"caustica.options.rt.superResolutionMethod.tooltip": "Какой апскейлер доводит изображение в разрешении рендера до вашего экрана. Авто использует FSR, если установлена его среда выполнения, иначе SGSR2. Билинейный работает всегда, но даёт более мягкую картинку.",
+	"caustica.options.rt.superResolutionMethod.auto": "Авто",
+	"caustica.options.rt.superResolutionMethod.fsr": "FSR",
+	"caustica.options.rt.superResolutionMethod.bilinear": "Билинейный",
+	"caustica.options.rt.superResolutionMethod.sgsr": "SGSR2 (Snapdragon)",
+	"caustica.options.rt.superResolutionMethod.sgsr.tooltip": "Snapdragon Game Super Resolution 2 от Qualcomm: временное масштабирование по тем же гайдам, что использует денойзер. Только compute, поэтому работает на GPU без среды FSR, включая мобильные.",
+	"caustica.options.rt.superResolution": "Суперразрешение",
+	"caustica.options.rt.superResolution.tooltip": "Разрешение рендера, в котором трассируется мир, прежде чем изображение масштабируется на экран. Низкие режимы рендерят меньше пикселей и масштабируют агрессивнее ради более высокого FPS; высокие режимы рендерят больше пикселей ради более чёткой картинки. DLSS Ray Reconstruction использует собственные эквивалентные режимы.",
+	"caustica.options.rt.superResolution.0": "Нативное AA / DLAA",
+	"caustica.options.rt.superResolution.1": "Качество",
+	"caustica.options.rt.superResolution.2": "Баланс",
+	"caustica.options.rt.superResolution.3": "Производительность",
+	"caustica.options.rt.superResolution.4": "Ультра-производительность",
 
 	"caustica.options.rt.debugView": "Отладочный вид",
 	"caustica.options.rt.debugView.tooltip": "Показывает промежуточный буфер трассировки лучей вместо финального изображения.",
@@ -49,5 +78,7 @@
 	"caustica.options.rt.debugView.4": "Шероховатость",
 	"caustica.options.rt.debugView.5": "Движение",
 	"caustica.options.rt.debugView.6": "Зеркальность",
-	"caustica.options.rt.debugView.7": "Зеркальное движение"
+	"caustica.options.rt.debugView.7": "Зеркальное движение",
+	"caustica.options.rt.debugView.8": "Ложный цвет экспозиции",
+	"caustica.options.rt.debugView.9": "Вес замера"
 }

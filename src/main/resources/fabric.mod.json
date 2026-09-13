@@ -2,7 +2,7 @@
 	"schemaVersion": 1,
 	"id": "caustica",
 	"version": "${version}",
-	"name": "Caustica",
+	"name": "Caustica for Mobile",
 	"description": "Hardware-ray-traced renderer for the Minecraft Vulkan backend, with DLSS Ray Reconstruction, NRD or a built-in denoiser reconstructing the image.",
 	"authors": [
 		"i"

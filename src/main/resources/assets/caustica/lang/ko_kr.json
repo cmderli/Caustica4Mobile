@@ -9,6 +9,9 @@
 	"caustica.options.rt.manualEv": "노출 EV",
 	"caustica.options.rt.manualEv.tooltip": "스톱 단위의 노출 보정입니다. 수동에서는 고정 노출로 사용되며, 자동에서는 자동 노출을 더 밝거나 어둡게 보정합니다.",
 
+	"caustica.options.rt.gamma": "감마",
+	"caustica.options.rt.gamma.tooltip": "변환 후 휘도 감마입니다. 1.00 미만의 값은 검정, 흰색, 색 비율을 유지하면서 그림자와 중간톤을 밝게 합니다.",
+
 	"caustica.options.rt.spp": "픽셀당 샘플 수",
 	"caustica.options.rt.spp.tooltip": "각 프레임에서 픽셀마다 사용하는 패스 트레이싱 샘플 수입니다. 높을수록 깨끗하지만 더 많은 성능이 필요합니다.",
 
@@ -37,8 +40,34 @@
 	"caustica.options.rt.hdr": "HDR 출력",
 	"caustica.options.rt.hdr.tooltip": "HDR(ST.2084/PQ) 또는 기본 SDR 출력용으로 스왑체인을 다시 만듭니다. 다음 프레임 경계에서 적용됩니다.",
 
+	"caustica.options.rt.hdrUiBrightness": "HDR UI 밝기",
+	"caustica.options.rt.hdrUiBrightness.tooltip": "HDR 디스플레이에서 SDR용으로 만든 UI에 지정하는 절대 밝기(nits)입니다. BT.2408은 SDR 그래픽 흰색을 203nits로 두고, 1000nits 피크에서 ACES HDR 출력 변환은 장면의 흰 표면을 약 107nits에 놓습니다.",
+
 	"caustica.options.rt.hdrPeak": "HDR 최대 밝기",
 	"caustica.options.rt.hdrPeak.tooltip": "하이라이트가 롤오프되는 대상 절대 밝기(nits)입니다. 디스플레이의 최대 HDR 밝기에 맞추세요.",
+
+	"caustica.options.rt.denoiser": "디노이저",
+	"caustica.options.rt.denoiser.tooltip": "어떤 디노이저로 패스트레이싱 이미지를 정리할지 정합니다. 자동은 이 환경에서 실행할 수 있는 가장 좋은 것을 고릅니다. DLSS 레이 재구성은 NVIDIA RTX GPU가, NRD는 전용 네이티브 라이브러리가 필요합니다. 내장 디노이저는 항상 동작하지만 프레임 기록이 없어 더 흐릿합니다. 끄면 원본 추적 이미지를 표시합니다.",
+	"caustica.options.rt.denoiser.auto": "자동",
+	"caustica.options.rt.denoiser.dlss-rr": "DLSS 레이 재구성",
+	"caustica.options.rt.denoiser.nrd": "NRD",
+	"caustica.options.rt.denoiser.builtin": "내장",
+	"caustica.options.rt.denoiser.off": "끄기",
+
+	"caustica.options.rt.superResolutionMethod": "초해상도 방식",
+	"caustica.options.rt.superResolutionMethod.tooltip": "어떤 업스케일러로 렌더링 해상도 이미지를 화면까지 가져올지 정합니다. 자동은 FSR 런타임이 설치되어 있으면 FSR을, 아니면 SGSR2를 사용합니다. 바이리니어는 항상 동작하지만 더 흐릿합니다.",
+	"caustica.options.rt.superResolutionMethod.auto": "자동",
+	"caustica.options.rt.superResolutionMethod.fsr": "FSR",
+	"caustica.options.rt.superResolutionMethod.bilinear": "바이리니어",
+	"caustica.options.rt.superResolutionMethod.sgsr": "SGSR2(Snapdragon)",
+	"caustica.options.rt.superResolutionMethod.sgsr.tooltip": "Qualcomm Snapdragon Game Super Resolution 2입니다. 디노이저와 같은 가이드로 시간적 업스케일을 합니다. 컴퓨트만 사용하므로 FSR 런타임이 없는 GPU(모바일 포함)에서도 동작합니다.",
+	"caustica.options.rt.superResolution": "초해상도",
+	"caustica.options.rt.superResolution.tooltip": "월드를 어느 렌더링 해상도로 추적한 뒤 화면으로 확대할지 정합니다. 낮은 모드는 픽셀을 적게 렌더링하고 더 공격적으로 확대해 프레임률이 높아지며, 높은 모드는 픽셀을 더 많이 렌더링해 이미지가 더 선명해집니다. DLSS 레이 재구성은 자체적인 동등 모드를 사용합니다.",
+	"caustica.options.rt.superResolution.0": "네이티브 AA / DLAA",
+	"caustica.options.rt.superResolution.1": "품질",
+	"caustica.options.rt.superResolution.2": "균형",
+	"caustica.options.rt.superResolution.3": "성능",
+	"caustica.options.rt.superResolution.4": "울트라 성능",
 
 	"caustica.options.rt.debugView": "디버그 보기",
 	"caustica.options.rt.debugView.tooltip": "최종 이미지 대신 중간 레이 트레이싱 버퍼를 시각화합니다.",
@@ -49,5 +78,7 @@
 	"caustica.options.rt.debugView.4": "거칠기",
 	"caustica.options.rt.debugView.5": "모션",
 	"caustica.options.rt.debugView.6": "스페큘러",
-	"caustica.options.rt.debugView.7": "스페큘러 모션"
+	"caustica.options.rt.debugView.7": "스페큘러 모션",
+	"caustica.options.rt.debugView.8": "노출 의사 색상",
+	"caustica.options.rt.debugView.9": "측광 가중치"
 }

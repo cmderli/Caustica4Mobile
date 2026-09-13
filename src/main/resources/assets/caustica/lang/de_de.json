@@ -9,6 +9,9 @@
 	"caustica.options.rt.manualEv": "Belichtung EV",
 	"caustica.options.rt.manualEv.tooltip": "Belichtungskorrektur in Blendenstufen. Im manuellen Modus ist dies die feste Belichtung. Im automatischen Modus verschiebt dies die automatische Belichtung heller oder dunkler.",
 
+	"caustica.options.rt.gamma": "Gamma",
+	"caustica.options.rt.gamma.tooltip": "Luminanz-Gamma nach der Transformation. Werte unter 1,00 hellen Schatten und Mitteltöne auf, während Schwarz, Weiß und die Farbverhältnisse erhalten bleiben.",
+
 	"caustica.options.rt.spp": "Samples pro Pixel",
 	"caustica.options.rt.spp.tooltip": "Pathtracing-Samples, die pro Pixel in jedem Frame genommen werden. Höhere Werte sind sauberer, aber anspruchsvoller.",
 
@@ -37,8 +40,34 @@
 	"caustica.options.rt.hdr": "HDR-Ausgabe",
 	"caustica.options.rt.hdr.tooltip": "Erstellt die Swapchain für HDR (ST.2084/PQ) oder native SDR-Ausgabe neu. Wird an der nächsten Bildgrenze angewendet.",
 
+	"caustica.options.rt.hdrUiBrightness": "HDR-UI-Helligkeit",
+	"caustica.options.rt.hdrUiBrightness.tooltip": "Absolute Helligkeit (in Nits), die SDR-erstellter UI auf einem HDR-Bildschirm zugewiesen wird. BT.2408 setzt SDR-Grafikweiß auf 203 Nits; bei 1000 Nits Spitzenhelligkeit legt die ACES-HDR-Ausgabe eine weiße Fläche der Szene auf etwa 107 Nits.",
+
 	"caustica.options.rt.hdrPeak": "HDR-Spitzenhelligkeit",
 	"caustica.options.rt.hdrPeak.tooltip": "Absolute Helligkeit (in Nits), auf die Highlights zulaufen. Stelle sie auf die Spitzenhelligkeit deines HDR-Bildschirms ein.",
+
+	"caustica.options.rt.denoiser": "Denoiser",
+	"caustica.options.rt.denoiser.tooltip": "Welcher Denoiser das pfadverfolgte Bild aufräumt. Automatisch wählt den besten, den dieser Rechner ausführen kann. DLSS Ray Reconstruction braucht eine NVIDIA-RTX-GPU, NRD seine native Bibliothek, und der eingebaute Denoiser funktioniert immer, ist aber weicher, weil er keine Frame-Historie hat. Aus zeigt das rohe Tracing-Bild.",
+	"caustica.options.rt.denoiser.auto": "Automatisch",
+	"caustica.options.rt.denoiser.dlss-rr": "DLSS Ray Reconstruction",
+	"caustica.options.rt.denoiser.nrd": "NRD",
+	"caustica.options.rt.denoiser.builtin": "Eingebaut",
+	"caustica.options.rt.denoiser.off": "Aus",
+
+	"caustica.options.rt.superResolutionMethod": "Hochskalierungsmethode",
+	"caustica.options.rt.superResolutionMethod.tooltip": "Welche Hochskalierung das Bild in Renderauflösung auf deinen Bildschirm bringt. Automatisch nutzt FSR, wenn dessen Laufzeit installiert ist, sonst SGSR2. Bilinear funktioniert immer, ist aber weicher.",
+	"caustica.options.rt.superResolutionMethod.auto": "Automatisch",
+	"caustica.options.rt.superResolutionMethod.fsr": "FSR",
+	"caustica.options.rt.superResolutionMethod.bilinear": "Bilinear",
+	"caustica.options.rt.superResolutionMethod.sgsr": "SGSR2 (Snapdragon)",
+	"caustica.options.rt.superResolutionMethod.sgsr.tooltip": "Qualcomms Snapdragon Game Super Resolution 2: zeitliche Hochskalierung aus denselben Guides, die der Denoiser nutzt. Reine Compute-Shader, läuft also auch auf GPUs ohne FSR-Laufzeit — inklusive Mobilgeräten.",
+	"caustica.options.rt.superResolution": "Hochskalierung",
+	"caustica.options.rt.superResolution.tooltip": "Renderauflösung, in der die Welt verfolgt wird, bevor sie auf deinen Bildschirm skaliert wird. Niedrigere Modi rendern weniger Pixel und skalieren stärker für höhere Bildraten; höhere Modi rendern mehr Pixel für ein schärferes Bild. DLSS Ray Reconstruction verwendet eigene, gleichwertige Modi.",
+	"caustica.options.rt.superResolution.0": "Natives AA / DLAA",
+	"caustica.options.rt.superResolution.1": "Qualität",
+	"caustica.options.rt.superResolution.2": "Ausgeglichen",
+	"caustica.options.rt.superResolution.3": "Leistung",
+	"caustica.options.rt.superResolution.4": "Ultra-Leistung",
 
 	"caustica.options.rt.debugView": "Debug-Ansicht",
 	"caustica.options.rt.debugView.tooltip": "Visualisiert einen Zwischenpuffer des Raytracings statt des finalen Bildes.",
@@ -49,5 +78,7 @@
 	"caustica.options.rt.debugView.4": "Rauheit",
 	"caustica.options.rt.debugView.5": "Bewegung",
 	"caustica.options.rt.debugView.6": "Spiegelnd",
-	"caustica.options.rt.debugView.7": "Spiegelnde Bewegung"
+	"caustica.options.rt.debugView.7": "Spiegelnde Bewegung",
+	"caustica.options.rt.debugView.8": "Belichtungs-Falschfarben",
+	"caustica.options.rt.debugView.9": "Messgewichtung"
 }

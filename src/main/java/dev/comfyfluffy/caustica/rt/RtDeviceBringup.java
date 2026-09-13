@@ -22,7 +22,6 @@ import org.lwjgl.vulkan.VkPhysicalDeviceRayTracingPipelineFeaturesKHR;
 import org.lwjgl.vulkan.VkPhysicalDeviceRayTracingPipelinePropertiesKHR;
 import org.lwjgl.vulkan.VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR;
 import org.lwjgl.vulkan.VkPhysicalDeviceRayQueryFeaturesKHR;
-import org.lwjgl.vulkan.VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT;
 import org.lwjgl.vulkan.VkPhysicalDeviceFeatures;
 import org.lwjgl.vulkan.VkPhysicalDeviceVulkan12Features;
 import org.lwjgl.vulkan.VkPhysicalDeviceOpacityMicromapFeaturesEXT;
@@ -51,8 +50,6 @@ import static org.lwjgl.vulkan.EXTOpacityMicromap.VK_STRUCTURE_TYPE_PHYSICAL_DEV
 import static org.lwjgl.vulkan.NVLowLatency2.VK_NV_LOW_LATENCY_2_EXTENSION_NAME;
 import static org.lwjgl.vulkan.KHRPresentId.VK_KHR_PRESENT_ID_EXTENSION_NAME;
 import static org.lwjgl.vulkan.KHRPresentId.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR;
-import static org.lwjgl.vulkan.EXTRayTracingInvocationReorder.VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME;
-import static org.lwjgl.vulkan.EXTRayTracingInvocationReorder.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT;
 
 /**
  * RT device bring-up. Enables the hardware ray-tracing device extensions and their
@@ -77,28 +74,36 @@ public final class RtDeviceBringup {
     }
 
     /**
-     * The device extensions RT needs (BDA/descriptor-indexing/SPIR-V 1.4 are core on 1.4).
-     * {@code ray_tracing_position_fetch} lets the closest-hit read hit triangle vertex positions
-     * ({@code gl_HitTriangleVertexPositionsEXT}) for the normal-map TBN, avoiding a positions buffer
-     * plumbed through the geometry tables. Supported on all RTX GPUs (the project's target).
-     * {@code ray_query} lets fragment shaders (the world-overlay pass, e.g. block outline) issue inline
-     * {@code rayQueryEXT} occlusion tests against the same TLAS the ray-tracing pipeline traces, without a
-     * dedicated raygen dispatch. Same RTX-GPU support floor as the rest of this list.
+     * The device extensions every RT backend needs (BDA/descriptor-indexing/SPIR-V 1.4 are core on 1.4).
+     * {@code ray_tracing_position_fetch} lets a hit read triangle vertex positions in object space — the
+     * builtin {@code gl_HitTriangleVertexPositionsEXT} in a closest-hit stage, the ray-query
+     * intersection query in an inline traversal — for the normal-map TBN, avoiding a positions buffer
+     * plumbed through the geometry tables. LabPBR normal maps depend on it on both backends.
+     * {@code ray_query} is the inline-traversal backend itself (the whole world pass on devices without a
+     * ray-tracing pipeline, and the world-overlay pass's {@code rayQueryEXT} occlusion test on devices
+     * with one).
      */
-    public static final List<String> RT_EXTENSIONS = List.of(
+    public static final List<String> RT_BASE_EXTENSIONS = List.of(
             VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-            VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
             VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
             VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME,
             VK_KHR_RAY_QUERY_EXTENSION_NAME);
 
     /**
+     * The ray-tracing pipeline extension. Preferred when present — the SBT gives each hit record its own
+     * shader and EXT SER can reorder invocations — but never required: without it the world pass runs on
+     * {@link WorldBackend#RAY_QUERY}, which traverses the same acceleration structures from compute.
+     */
+    public static final String RT_PIPELINE_EXTENSION = VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME;
+
+    /**
      * OPTIONAL RT extensions: enabled only when the selected device supports them AND the gate is on, but
-     * never required — a device lacking them still comes up RT-capable (unlike {@link #RT_EXTENSIONS}, whose
+     * never required — a device lacking them still comes up RT-capable (unlike {@link #RT_BASE_EXTENSIONS}, whose
      * absence disables RT entirely). {@code VK_EXT_opacity_micromap} (any-hit opt, lever C): per-triangle
-     * opacity micromaps let the hardware skip {@code world.rahit} on fully-opaque/transparent cutout micro-
-     * triangles, so the alpha-test any-hit runs only on the foliage silhouette. Hardware-accelerated on RTX
-     * 40-series and Blackwell; absent / software elsewhere, hence optional.
+     * opacity micromaps let the hardware skip the alpha-test hit record on fully-opaque/transparent cutout
+     * micro-triangles, so it runs only on the foliage silhouette. Hardware-accelerated on RTX 40-series and
+     * Blackwell; absent / software elsewhere, and meaningless to the ray-query backend, which has no hit
+     * records for the hardware to skip — hence optional.
      */
     public static final List<String> OPTIONAL_RT_EXTENSIONS = List.of(
             VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME);
@@ -138,6 +143,7 @@ public final class RtDeviceBringup {
     private static volatile boolean ngxCapable; // NVIDIA device advertising the NVX extensions NGX needs
     private static volatile boolean nrdDerivativesCapable; // NRD_DERIVATIVES_EXTENSION enabled + supported
     private static volatile SerBackend serBackend = SerBackend.NONE;
+    private static volatile WorldBackend worldBackend = WorldBackend.NONE;
     private static volatile boolean ommEnabled; // VK_EXT_opacity_micromap actually enabled on the device
     private static volatile boolean reflexEnabled; // VK_NV_low_latency2 actually enabled on the device
     private static volatile boolean presentIdEnabled; // VK_KHR_present_id actually enabled on the device
@@ -148,6 +154,22 @@ public final class RtDeviceBringup {
     private static volatile int computeQueueFamilyIndex = -1;
     private static volatile int computeQueueIndex = -1;
     private static boolean loggedUnavailable;
+    private static boolean loggedSerBindingsMissing;
+
+    /**
+     * The LWJGL binding class for {@code VK_EXT_ray_tracing_invocation_reorder}. Minecraft ships one
+     * LWJGL, but Android launchers substitute their own: the launcher's LWJGL 3.3.6 has no bindings for
+     * this extension at all. A direct reference to it is resolved while this class initializes, so its
+     * absence surfaces as a {@code NoClassDefFoundError} before any device exists and takes the whole
+     * client down. Naming it as a string and reading its constants reflectively turns that into "SER is
+     * unavailable on this LWJGL build".
+     */
+    private static final String SER_FEATURES_CLASS =
+            "org.lwjgl.vulkan.VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT";
+    private static final String SER_EXTENSION_NAME = "VK_EXT_ray_tracing_invocation_reorder";
+    // VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT. The sType is an ABI
+    // constant, so it stays valid even when the LWJGL class that would have named it is absent.
+    private static final int SER_FEATURES_S_TYPE = 1_000_581_000;
 
     private static final VulkanPNextStruct AS_FEATURES_STRUCT = new VulkanPNextStruct(
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
@@ -161,9 +183,8 @@ public final class RtDeviceBringup {
     private static final VulkanPNextStruct RAY_QUERY_FEATURES_STRUCT = new VulkanPNextStruct(
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
             VkPhysicalDeviceRayQueryFeaturesKHR.SIZEOF);
-    private static final VulkanPNextStruct SER_EXT_FEATURES_STRUCT = new VulkanPNextStruct(
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT,
-            VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT.SIZEOF);
+    private static final VulkanPNextStruct SER_EXT_FEATURES_STRUCT = optionalStruct(
+            SER_FEATURES_CLASS, SER_FEATURES_S_TYPE);
     private static final VulkanPNextStruct OMM_FEATURES_STRUCT = new VulkanPNextStruct(
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT,
             VkPhysicalDeviceOpacityMicromapFeaturesEXT.SIZEOF);
@@ -199,15 +220,45 @@ public final class RtDeviceBringup {
             VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR.RAYTRACINGPOSITIONFETCH);
     private static final VulkanFeature RAY_QUERY_FEATURE = new VulkanFeature(
             RAY_QUERY_FEATURES_STRUCT, "rayQuery", VkPhysicalDeviceRayQueryFeaturesKHR.RAYQUERY);
-    private static final VulkanFeature SER_EXT_FEATURE = new VulkanFeature(
-            SER_EXT_FEATURES_STRUCT, "rayTracingInvocationReorder(EXT)",
-            VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT.RAYTRACINGINVOCATIONREORDER);
+    private static final VulkanFeature SER_EXT_FEATURE = optionalFeature(
+            SER_EXT_FEATURES_STRUCT, SER_FEATURES_CLASS, "RAYTRACINGINVOCATIONREORDER",
+            "rayTracingInvocationReorder(EXT)");
     private static final VulkanFeature OMM_FEATURE = new VulkanFeature(
             OMM_FEATURES_STRUCT, "micromap", VkPhysicalDeviceOpacityMicromapFeaturesEXT.MICROMAP);
     private static final VulkanFeature PRESENT_ID_FEATURE = new VulkanFeature(
             PRESENT_ID_FEATURES_STRUCT, "presentId", VkPhysicalDevicePresentIdFeaturesKHR.PRESENTID);
     private static final VulkanFeature WIDE_LINES_FEATURE = new VulkanFeature(
             VulkanBackend.VK10_FEATURES_STRUCT, "wideLines", VkPhysicalDeviceFeatures.WIDELINES);
+
+    /**
+     * The pNext struct for a feature whose LWJGL binding class this client may not have, or null when it
+     * is absent (see {@link #SER_FEATURES_CLASS}). Null means "this build cannot express the feature",
+     * which callers treat exactly like a device that does not support it.
+     */
+    private static VulkanPNextStruct optionalStruct(String bindingClass, int sType) {
+        int size = optionalStaticInt(bindingClass, "SIZEOF", 0);
+        return size > 0 ? new VulkanPNextStruct(sType, size) : null;
+    }
+
+    /** The VulkanFeature for {@code struct}, or null when its binding class (or member offset) is absent. */
+    private static VulkanFeature optionalFeature(VulkanPNextStruct struct, String bindingClass,
+                                                 String memberOffset, String name) {
+        if (struct == null) {
+            return null;
+        }
+        int offset = optionalStaticInt(bindingClass, memberOffset, -1);
+        return offset >= 0 ? new VulkanFeature(struct, name, offset) : null;
+    }
+
+    /** A static int constant of an LWJGL binding class, or {@code fallback} when the class is absent. */
+    static int optionalStaticInt(String className, String field, int fallback) {
+        try {
+            Class<?> binding = Class.forName(className, false, RtDeviceBringup.class.getClassLoader());
+            return binding.getField(field).getInt(null);
+        } catch (Throwable ignored) {
+            return fallback;
+        }
+    }
 
     private static final List<VulkanFeature> REQUIRED_RT_FEATURES = List.of(
             BUFFER_DEVICE_ADDRESS_FEATURE,
@@ -217,14 +268,39 @@ public final class RtDeviceBringup {
             SAMPLED_IMAGE_UPDATE_AFTER_BIND_FEATURE,
             SHADER_INT64_FEATURE,
             ACCELERATION_STRUCTURE_FEATURE,
-            RAY_TRACING_PIPELINE_FEATURE,
             POSITION_FETCH_FEATURE,
             RAY_QUERY_FEATURE);
 
+    /**
+     * Which traversal the world pass runs on. Both backends trace the same acceleration structures and
+     * share every shader below the entry points; they differ in who owns traversal. The ray-tracing
+     * pipeline dispatches raygen/any-hit/closest-hit/miss stages through an SBT and can reorder
+     * invocations (EXT SER); the ray-query backend inline-traverses from one compute thread per pixel and
+     * emulates the any-hit records with a candidate loop, which is what makes the renderer run on devices
+     * that expose {@code VK_KHR_ray_query} without {@code VK_KHR_ray_tracing_pipeline}.
+     */
+    public enum WorldBackend {
+        NONE("none", null, null),
+        // The ray-tracing pipeline's entry points come from SerBackend, which knows whether the ordinary
+        // or the reordered indirect shader was compiled in; only the ray-query backend names its compute
+        // shaders here.
+        RAY_TRACING_PIPELINE("ray tracing pipeline", null, null),
+        RAY_QUERY("ray query", "primary_rq.comp.spv", "indirect_rq.comp.spv");
+
+        final String label;
+        final String rayQueryPrimaryShader;
+        final String rayQueryMainShader;
+
+        WorldBackend(String label, String rayQueryPrimaryShader, String rayQueryMainShader) {
+            this.label = label;
+            this.rayQueryPrimaryShader = rayQueryPrimaryShader;
+            this.rayQueryMainShader = rayQueryMainShader;
+        }
+    }
+
     private enum SerBackend {
         NONE("none", null, "primary.rgen.spv", "indirect.rgen.spv"),
-        EXT("EXT", VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME,
-                "primary.rgen.spv", "indirect_ser.rgen.spv");
+        EXT("EXT", SER_EXTENSION_NAME, "primary.rgen.spv", "indirect_ser.rgen.spv");
 
         final String label;
         final String extensionName;
@@ -240,7 +316,8 @@ public final class RtDeviceBringup {
         }
     }
 
-    private record FeatureSupport(List<String> missingRequired, SerBackend serBackend,
+    private record FeatureSupport(List<String> missingRequired, boolean rayTracingPipeline,
+                                  SerBackend serBackend,
                                   boolean omm, boolean presentId, boolean wideLines) {
         boolean supportsRt() {
             return missingRequired.isEmpty();
@@ -253,6 +330,16 @@ public final class RtDeviceBringup {
     /** True once we have augmented a device creation to request RT (extensions + features). */
     public static boolean rtRequested() {
         return rtRequested;
+    }
+
+    /** The traversal backend the world pass runs on; {@link WorldBackend#NONE} until device creation. */
+    public static WorldBackend worldBackend() {
+        return worldBackend;
+    }
+
+    /** True when the world pass inline-traverses from compute instead of using a ray-tracing pipeline. */
+    public static boolean worldUsesRayQuery() {
+        return worldBackend == WorldBackend.RAY_QUERY;
     }
 
     /**
@@ -277,12 +364,20 @@ public final class RtDeviceBringup {
         return nrdDerivativesCapable;
     }
 
+    /**
+     * The indirect/bounce pass entry point for the selected backend. The ray-tracing pipeline names its
+     * raygen shader here (the SER variant when the extension is enabled), the ray-query backend the
+     * compute shader dispatched over the render target.
+     */
     public static String worldRaygenShader() {
-        return serBackend.worldRaygenShader;
+        return worldBackend == WorldBackend.RAY_QUERY
+                ? WorldBackend.RAY_QUERY.rayQueryMainShader : serBackend.worldRaygenShader;
     }
 
+    /** The primary/guide pass entry point for the selected backend. */
     public static String worldPrimaryRaygenShader() {
-        return serBackend.worldPrimaryRaygenShader;
+        return worldBackend == WorldBackend.RAY_QUERY
+                ? WorldBackend.RAY_QUERY.rayQueryPrimaryShader : serBackend.worldPrimaryRaygenShader;
     }
 
     public static boolean serExtEnabled() {
@@ -473,6 +568,11 @@ public final class RtDeviceBringup {
         return CausticaConfig.Rt.Omm.ENABLED.value();
     }
 
+    /** True when the config forces the ray-query traversal even on a device that could run the pipeline. */
+    private static boolean rayQueryForced() {
+        return "ray-query".equals(CausticaConfig.Rt.Traversal.BACKEND.get());
+    }
+
     private static boolean reflexRequested() {
         return CausticaConfig.Rt.Reflex.ENABLED.value();
     }
@@ -485,13 +585,24 @@ public final class RtDeviceBringup {
                 feature.struct().findOrCreateStructInPNextChain(available, stack);
             }
 
-            boolean hasSerExt = physicalDevice.hasDeviceExtension(
-                    VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
+            // The pipeline feature is queried only when its extension is present and wanted, so a
+            // ray-query-only device — and a device forced onto the ray-query backend — reports it as
+            // absent rather than as a missing requirement. SER and OMM are gated on the same answer,
+            // because both ride on records only a ray-tracing pipeline dispatches.
+            boolean hasPipelineExt = !rayQueryForced()
+                    && physicalDevice.hasDeviceExtension(RT_PIPELINE_EXTENSION);
+            if (hasPipelineExt) {
+                RAY_TRACING_PIPELINE_FEATURE.struct().findOrCreateStructInPNextChain(available, stack);
+            }
+            // SER needs the extension, the pipeline that dispatches its records, and LWJGL bindings for
+            // its feature struct — the last of which an Android launcher's LWJGL may not ship.
+            boolean hasSerExt = hasPipelineExt && SER_EXT_FEATURE != null
+                    && physicalDevice.hasDeviceExtension(SER_EXTENSION_NAME);
             if (hasSerExt) {
                 SER_EXT_FEATURE.struct().findOrCreateStructInPNextChain(available, stack);
             }
 
-            boolean queryOmm = ommRequested()
+            boolean queryOmm = ommRequested() && hasPipelineExt
                     && physicalDevice.hasDeviceExtension(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME);
             if (queryOmm) {
                 OMM_FEATURE.struct().findOrCreateStructInPNextChain(available, stack);
@@ -512,9 +623,10 @@ public final class RtDeviceBringup {
                     missing.add(feature.name());
                 }
             }
+            boolean rayTracingPipeline = hasPipelineExt && RAY_TRACING_PIPELINE_FEATURE.get(available);
             SerBackend supportedSer = hasSerExt && SER_EXT_FEATURE.get(available) ? SerBackend.EXT
                     : SerBackend.NONE;
-            return new FeatureSupport(missing, supportedSer,
+            return new FeatureSupport(missing, rayTracingPipeline, supportedSer,
                     queryOmm && OMM_FEATURE.get(available),
                     queryPresentId && PRESENT_ID_FEATURE.get(available),
                     WIDE_LINES_FEATURE.get(available));
@@ -522,7 +634,7 @@ public final class RtDeviceBringup {
     }
 
     private static String firstUnsupportedExtension(VulkanPhysicalDevice physicalDevice) {
-        for (String ext : RT_EXTENSIONS) {
+        for (String ext : RT_BASE_EXTENSIONS) {
             if (!physicalDevice.hasDeviceExtension(ext)) {
                 return ext;
             }
@@ -549,10 +661,16 @@ public final class RtDeviceBringup {
         if (!support.supportsRt()) {
             return;
         }
-        for (String ext : RT_EXTENSIONS) {
+        for (String ext : RT_BASE_EXTENSIONS) {
             if (!augmentedExtensions.contains(ext)) {
                 augmentedExtensions.add(ext);
             }
+        }
+        // The pipeline extension is added when the device advertises it and the ray-query backend is not
+        // forced; without it the world pass falls back to ray query instead of disabling RT.
+        if (support.rayTracingPipeline && !rayQueryForced()
+                && !augmentedExtensions.contains(RT_PIPELINE_EXTENSION)) {
+            augmentedExtensions.add(RT_PIPELINE_EXTENSION);
         }
         // Requested, and the feature chained, only when the driver actually supports it: adding the name
         // for an unsupported extension would fail vkCreateDevice.
@@ -581,6 +699,7 @@ public final class RtDeviceBringup {
         }
         rtRequested = false;
         serBackend = SerBackend.NONE;
+        worldBackend = WorldBackend.NONE;
         ommEnabled = false;
         reflexEnabled = false;
         presentIdEnabled = false;
@@ -610,11 +729,24 @@ public final class RtDeviceBringup {
         // Core features merge into vanilla's VK10/VK12 structs; extension features create their matching
         // pNext structs. Every boolean here was verified by queryFeatureSupport above.
         features.addAll(REQUIRED_RT_FEATURES);
-        // Bindless entity textures: a runtime-sized sampler2D[] indexed non-uniformly in the hit shader,
-        // with partially-bound + update-after-bind slots (a growing per-RenderType registry). Core on the
-        // VK 1.4 device; just needs enabling alongside bufferDeviceAddress on the same struct.
+        // The pipeline feature is only in the required set when its extension is being enabled; a
+        // ray-query-only device must not request a feature it does not have.
+        WorldBackend supportedBackend = support.rayTracingPipeline
+                ? WorldBackend.RAY_TRACING_PIPELINE : WorldBackend.RAY_QUERY;
+        if (support.rayTracingPipeline) {
+            features.add(RAY_TRACING_PIPELINE_FEATURE);
+        }
+        // Optional: EXT shader execution reordering. The feature struct is only expressible when this
+        // client's LWJGL has its bindings, which is what queryFeatureSupport already folded into the
+        // backend choice — SerBackend.EXT therefore implies SER_EXT_FEATURE is present.
         if (support.serBackend == SerBackend.EXT) {
             features.add(SER_EXT_FEATURE);
+        } else if (SER_EXT_FEATURE == null && physicalDevice.hasDeviceExtension(SER_EXTENSION_NAME)
+                && !loggedSerBindingsMissing) {
+            loggedSerBindingsMissing = true;
+            CausticaMod.LOGGER.info(
+                    "EXT shader execution reordering unavailable: this client's LWJGL has no bindings for {} "
+                            + "(the world pass still runs, without SER)", SER_EXTENSION_NAME);
         }
 
         // Optional: wideLines (core VK10 feature, no extension). Lets the world-overlay pass (block
@@ -658,21 +790,27 @@ public final class RtDeviceBringup {
         args.set(2, features);
 
         rtRequested = true;
+        worldBackend = supportedBackend;
         serBackend = support.serBackend;
-        List<String> optionalExtensions = supportedOptionalExtensions(physicalDevice, support);
+        String optionalSuffix = supportedOptionalExtensions(physicalDevice, support).stream()
+                .map(ext -> " + " + ext).reduce("", String::concat);
         CausticaMod.LOGGER.info(
-                "Ray tracing: enabling {}{}{} + features [bufferDeviceAddress, accelerationStructure, rayTracingPipeline, rayQuery, SER={}"
+                "Ray tracing: world pass on {} + extensions {}{}{}{} + features [bufferDeviceAddress, "
+                        + "accelerationStructure, rayQuery{}, SER={}"
                         + (wideLinesEnabled ? ", wideLines(max=" + maxLineWidth + ")" : "")
                         + (ommEnabled ? ", opacityMicromap" : "") + "] + overlayMsaa=" + overlayMsaaSamples + "x on [{}]",
-                RT_EXTENSIONS, serBackend.extensionName == null ? "" : " + " + serBackend.extensionName,
-                optionalExtensions.isEmpty() ? "" : " + " + optionalExtensions,
+                worldBackend.label, RT_BASE_EXTENSIONS,
+                support.rayTracingPipeline ? " + " + RT_PIPELINE_EXTENSION : "",
+                serBackend.extensionName == null ? "" : " + " + serBackend.extensionName,
+                optionalSuffix,
+                support.rayTracingPipeline ? ", rayTracingPipeline" : "",
                 serBackend.label, physicalDevice.deviceName());
     }
 
     /**
-     * Post-creation verification: confirm the RT entry points actually loaded on the new
-     * device and log the RT pipeline / acceleration-structure limits. If this logs "OK",
-     * the device truly came up RT-capable.
+     * Post-creation verification: confirm the RT entry points actually loaded on the new device and log
+     * the acceleration-structure limits (plus the SBT limits when the world pass runs on a ray-tracing
+     * pipeline). If this logs "OK", the device truly came up RT-capable.
      */
     public static void probe(VkDevice device) {
         if (!rtRequested) {
@@ -685,7 +823,12 @@ public final class RtDeviceBringup {
             boolean rtPipeline = caps.vkCreateRayTracingPipelinesKHR != 0L;
             boolean asBuild = caps.vkCmdBuildAccelerationStructuresKHR != 0L;
             boolean traceRays = caps.vkCmdTraceRaysKHR != 0L;
-            if (!(rtPipeline && asBuild && traceRays)) {
+            // The ray-query backend never creates a ray-tracing pipeline or calls vkCmdTraceRaysKHR, and the
+            // loader only resolves those entry points for an enabled extension — so they are required
+            // exactly when the selected backend uses them.
+            boolean pipelinesOk = worldBackend != WorldBackend.RAY_TRACING_PIPELINE
+                    || (rtPipeline && traceRays);
+            if (!(pipelinesOk && asBuild)) {
                 CausticaMod.LOGGER.error(
                         "RT extensions enabled but entry points missing (rtPipeline={}, asBuild={}, traceRays={}) — RT bring-up FAILED",
                         rtPipeline, asBuild, traceRays);
@@ -694,9 +837,10 @@ public final class RtDeviceBringup {
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps =
                         VkPhysicalDeviceAccelerationStructurePropertiesKHR.calloc(stack).sType$Default();
+                // The ray-tracing pipeline properties struct belongs to an extension a ray-query-only device
+                // was never asked for, so it stays out of the chain there.
                 VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps =
                         VkPhysicalDeviceRayTracingPipelinePropertiesKHR.calloc(stack).sType$Default();
-                rtProps.pNext(asProps.address());
                 // Chain the OMM properties only when the feature is enabled (else the driver would ignore an
                 // unrecognized struct, but keeping the chain clean matches the enabled feature set).
                 VkPhysicalDeviceOpacityMicromapPropertiesEXT ommProps = null;
@@ -705,14 +849,24 @@ public final class RtDeviceBringup {
                     asProps.pNext(ommProps.address());
                 }
                 VkPhysicalDeviceProperties2 props2 = VkPhysicalDeviceProperties2.calloc(stack).sType$Default();
-                props2.pNext(rtProps.address());
+                if (worldBackend == WorldBackend.RAY_TRACING_PIPELINE) {
+                    rtProps.pNext(asProps.address());
+                    props2.pNext(rtProps.address());
+                } else {
+                    props2.pNext(asProps.address());
+                }
                 VK12.vkGetPhysicalDeviceProperties2(device.getPhysicalDevice(), props2);
 
                 CausticaMod.LOGGER.info(
-                        "RT bring-up OK — shaderGroupHandleSize={}, shaderGroupBaseAlignment={}, maxRayRecursionDepth={}; "
-                                + "maxAS geometry/instance/primitive = {}/{}/{}",
-                        rtProps.shaderGroupHandleSize(), rtProps.shaderGroupBaseAlignment(), rtProps.maxRayRecursionDepth(),
+                        "RT bring-up OK — world pass on {}; maxAS geometry/instance/primitive = {}/{}/{}",
+                        worldBackend.label,
                         asProps.maxGeometryCount(), asProps.maxInstanceCount(), asProps.maxPrimitiveCount());
+                if (worldBackend == WorldBackend.RAY_TRACING_PIPELINE) {
+                    CausticaMod.LOGGER.info(
+                            "SBT limits — shaderGroupHandleSize={}, shaderGroupBaseAlignment={}, maxRayRecursionDepth={}",
+                            rtProps.shaderGroupHandleSize(), rtProps.shaderGroupBaseAlignment(),
+                            rtProps.maxRayRecursionDepth());
+                }
                 if (ommProps != null) {
                     maxOpacity4StateSubdivisionLevel = ommProps.maxOpacity4StateSubdivisionLevel();
                     CausticaMod.LOGGER.info(

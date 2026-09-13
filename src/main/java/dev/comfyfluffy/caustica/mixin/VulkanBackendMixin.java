@@ -62,15 +62,15 @@ public abstract class VulkanBackendMixin {
 			new VulkanFeature(VulkanBackend.VK12_FEATURES_STRUCT, "shaderFloat16", VkPhysicalDeviceVulkan12Features.SHADERFLOAT16));
 
 	private static final List<String> CAUSTICA_WANTED_EXTENSIONS = List.of(
-			// FFX (FSR)
+			// FFX (FSR): the runtime resolves vkGetImageMemoryRequirements2KHR and friends through
+			// vkGetDeviceProcAddr, which returns NULL unless the extension was enabled.
 			"VK_KHR_get_memory_requirements2",
 			"VK_KHR_dedicated_allocation",
 			// NGX (DLSS) — NVIDIA-only; skipped on other vendors. (The NGX instance
 			// extension VK_KHR_get_physical_device_properties2 needs an instance hook;
 			// DLSS relies on it being core/enabled at instance level.)
 			RtDeviceBringup.NGX_BINARY_IMPORT_EXTENSION,
-			RtDeviceBringup.NGX_IMAGE_VIEW_HANDLE_EXTENSION,
-			"VK_KHR_push_descriptor");
+			RtDeviceBringup.NGX_IMAGE_VIEW_HANDLE_EXTENSION);
 
 	private static final Set<String> loggedMissingSdkFeatures = new HashSet<>();
 

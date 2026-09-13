@@ -96,6 +96,15 @@ void probeBloomPush(uint3 id : SV_DispatchThreadID) {
     }
 }
 
+[[vk::push_constant]] SgsrParams sgsrParamsProbe;
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void probeSgsrParams(uint3 id : SV_DispatchThreadID) {
+    if (id.x == 0xFFFFFFFFu) {
+        float sink = float(sgsrParamsProbe.renderWidth) + sgsrParamsProbe.cameraFovHor;
+    }
+}
+
 [[vk::push_constant]] MotionBlurPush motionBlurPushProbe;
 [shader("compute")]
 [numthreads(1, 1, 1)]

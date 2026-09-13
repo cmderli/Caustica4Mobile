@@ -1,13 +1,9 @@
-// Minimal miss record for reflection/refraction guide probes and ordinary TraceRay shadow visibility.
-// Guide rays consume only hit-vs-miss state; fixed sky guide values are supplied by raygen. Shadow rays
-// seed flags=1 and use this clear as their miss marker, avoiding a hit-object dependency.
+// Ray-tracing backend entry point for the minimal guide/shadow miss. The body lives in guide_miss.slang,
+// which the ray-query traversal calls directly.
 import world_common;
+import guide_miss;
 
 [shader("miss")]
 void main(inout Payload payload) {
-    // Preserve hitT: guide payloads already seed the -1 miss sentinel, while shadow any-hit may have
-    // recorded the nearest water crossing here for underwater caustics. Preserve the surface words too:
-    // this record serves shadow rays, whose accumulated transmittance lives in their albedo view.
-    packNormal(payload, float3(0.0, 0.0, 0.0));
-    payload.flags = 0u;
+    guideMiss(payload);
 }

@@ -20,30 +20,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Language file invariants for the RT options. A missing key does not crash anything — Minecraft falls back to
  * English — so nothing else would notice a locale that quietly lost an option, and a typo in a key name is
- * invisible until someone plays in that language.
+ * invisible until someone plays in that language. The options are all translated rather than left to the
+ * English fallback, so a new option is not done until every locale carries it.
  */
 final class CausticaLangTest {
     private static final String EN_US = "en_us";
     private static final List<String> LOCALES = List.of(
             "de_de", "en_us", "es_es", "fr_fr", "it_it", "ja_jp", "ko_kr", "pt_br", "ru_ru", "zh_cn", "zh_tw");
-    private static final String MOTION_BLUR_PREFIX = "caustica.options.rt.motionBlur";
 
-    /** Every locale translates the motion blur options that the video screen adds. */
+    /** Every locale carries a non-blank translation of every option string English defines. */
     @Test
-    void everyLocaleTranslatesTheMotionBlurOptions() {
-        List<String> keys = keysWithPrefix(read(EN_US), MOTION_BLUR_PREFIX);
-        assertTrue(keys.contains(MOTION_BLUR_PREFIX), "the option label itself must be a key");
-        assertTrue(keys.contains(MOTION_BLUR_PREFIX + "Shutter"), "the shutter angle must be a key");
-        assertTrue(keys.contains(MOTION_BLUR_PREFIX + "Samples"), "the sample count must be a key");
-        assertTrue(keys.size() >= 6, "each option needs a label and a tooltip: " + keys);
+    void everyLocaleTranslatesEveryOption() {
+        Map<String, String> english = read(EN_US);
+        assertFalse(english.isEmpty(), "the reference locale defines the option strings");
 
         for (String locale : LOCALES) {
             Map<String, String> strings = read(locale);
-            for (String key : keys) {
+            List<String> missing = new ArrayList<>();
+            for (String key : english.keySet()) {
                 String value = strings.get(key);
-                assertNotNull(value, locale + " is missing " + key);
-                assertFalse(value.isBlank(), locale + ": " + key + " is blank");
+                if (value == null || value.isBlank()) {
+                    missing.add(key);
+                }
             }
+            assertTrue(missing.isEmpty(), locale + " does not translate: " + missing);
         }
     }
 
@@ -63,16 +63,6 @@ final class CausticaLangTest {
             }
             assertTrue(extra.isEmpty(), locale + " has keys English does not: " + extra);
         }
-    }
-
-    private static List<String> keysWithPrefix(Map<String, String> strings, String prefix) {
-        List<String> keys = new ArrayList<>();
-        for (String key : strings.keySet()) {
-            if (key.startsWith(prefix)) {
-                keys.add(key);
-            }
-        }
-        return keys;
     }
 
     private static Map<String, String> read(String locale) {

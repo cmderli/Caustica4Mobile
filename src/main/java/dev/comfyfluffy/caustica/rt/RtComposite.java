@@ -509,6 +509,9 @@ public final class RtComposite {
             failed = false;
             CausticaMod.LOGGER.info("RT failure latch cleared by render-state invalidation; retrying RT");
         }
+        // The reconstruction backends latch their own failures; without this, one transient upscaler error
+        // would keep the session on the built-in resolve until the device is restarted.
+        RtRecon.INSTANCE.clearUpscalerFailure();
     }
 
     /** Capture the frame's camera for the next composite. Called from GameRendererMixin. */
@@ -524,6 +527,9 @@ public final class RtComposite {
     /** Reset exposure filtering after an explicit render-state invalidation such as F3+A. */
     public void resetExposureHistory() {
         exposure.requestReset();
+        // A temporal upscaler accumulates across frames, so it has to be told when the renderer's state is
+        // discontinuous for the same reason the exposure controller does.
+        RtRecon.INSTANCE.requestUpscalerReset();
     }
 
     /**
@@ -576,6 +582,18 @@ public final class RtComposite {
 
     public void endFrame() {
         RtFrameStats.FRAME.end();
+    }
+
+    /**
+     * Switches the RT path off for the rest of the session. Used by the GPU executor when a completion wait
+     * expires: the frame cannot be validated any more, so the renderer falls back to vanilla rather than
+     * freezing on the wait or taking the client down with an exception.
+     */
+    public void latchOff(String reason) {
+        if (!failed) {
+            failed = true;
+            CausticaMod.LOGGER.error("RT disabled for this session: {}", reason);
+        }
     }
 
     public boolean composite(GpuTexture nativeColor, int width, int height) {
@@ -736,18 +754,24 @@ public final class RtComposite {
             // earliest possible bind: ensureResourcesReady drives this from the client tick, ahead of the
             // render()/composite path. bindWorldTextures only ever runs again on a
             // resource reload, so a skyLut that is still null on this first call stays permanently unbound
-            // and every miss/raygen sky sample reads the pre-vkUpdateDescriptorSets undefined descriptor
-            // (VUID-vkCmdTraceRaysKHR-None-08114).
+            // and every miss/raygen sky sample reads the pre-vkUpdateDescriptorSets undefined descriptor.
             if (skyLut == null) {
                 skyLut = RtSkyLut.create(ctx);
             }
             bindlessTextureCapacity = RtEntityTextures.maxTextures();
-            worldPipeline = RtPipeline.create(ctx, new String[]{
-                            RtDeviceBringup.worldPrimaryRaygenShader(),
-                            RtDeviceBringup.worldRaygenShader()},
-                    new String[]{"sky.rmiss.spv", "guide.rmiss.spv"},
-                    "closest_hit.rchit.spv", "any_hit.rahit.spv",
-                    WorldPushConstantsData.BYTE_SIZE, bindlessTextureCapacity);
+            String primaryPassShader = RtDeviceBringup.worldPrimaryRaygenShader();
+            String mainPassShader = RtDeviceBringup.worldRaygenShader();
+            // Both backends bind the same descriptor layout and share every shader module below their entry
+            // points; only the entry points differ — SBT-dispatched raygen stages, or compute shaders that
+            // own the inline traversal. The ray-query backend needs no hit/miss module names, because those
+            // bodies are plain functions inside its compute shaders.
+            worldPipeline = RtDeviceBringup.worldUsesRayQuery()
+                    ? RtPipeline.createRayQuery(ctx, new String[]{primaryPassShader, mainPassShader},
+                            WorldPushConstantsData.BYTE_SIZE, bindlessTextureCapacity)
+                    : RtPipeline.create(ctx, new String[]{primaryPassShader, mainPassShader},
+                            new String[]{"sky.rmiss.spv", "guide.rmiss.spv"},
+                            "closest_hit.rchit.spv", "any_hit.rahit.spv",
+                            WorldPushConstantsData.BYTE_SIZE, bindlessTextureCapacity);
             // Per-frame world data lives in this BDA ring; the pipeline pushes its address and hot fields.
             if (pushRing == null) {
                 pushRing = new PushSlot[PUSH_RING];
@@ -970,6 +994,13 @@ public final class RtComposite {
         int[] renderSize = RtRecon.INSTANCE.renderSize(width, height);
         renderW = renderSize != null ? renderSize[0] : width;
         renderH = renderSize != null ? renderSize[1] : height;
+        // One line per (re)size of the frame graph, so a log tells which stage owns the image and whether
+        // anything actually upscales: equal render and display sizes mean the super-resolution mode has
+        // nothing to do because no denoiser or upscaler is active.
+        CausticaMod.LOGGER.info(
+                "RT reconstruction: denoiser={}, upscaler={}, {}x{} render -> {}x{} display",
+                RtRecon.INSTANCE.denoiser(), RtRecon.INSTANCE.upscaler(),
+                renderW, renderH, width, height);
         renderSizeKey = reconSizeKey;
 
         // RT traces and the reconstruction backend work in scene-linear ACEScg in an HDR
@@ -1271,7 +1302,8 @@ public final class RtComposite {
                     RtRecon.INSTANCE.setRadianceLanes(gDiffRadianceHitDist, gSpecRadianceHitDist);
                     rrDone = RtRecon.INSTANCE.evaluate(cmd, output, gDepth, gMotion, gAlbedo,
                             gSpecAlbedo, gNormal, gSpecMotion, rrOutput, renderW, renderH, displayW, displayH,
-                            jitterX, jitterY, frameViewRotation, frameProjection, reconWorldPrevToWorld);
+                            jitterX, jitterY, frameViewRotation, frameProjection,
+                            reconWorldPrevToWorld);
                 }
             }
 

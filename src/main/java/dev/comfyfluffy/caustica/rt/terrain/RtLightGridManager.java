@@ -120,16 +120,34 @@ final class RtLightGridManager {
     }
 
     void awaitIdle() {
+        awaitIdleBounded(0L);
+    }
+
+    /**
+     * Bounded variant used by teardown: {@code timeoutMillis == 0} waits indefinitely (the historical
+     * behaviour), anything else gives up and reports false so the caller can abandon its GPU frees.
+     */
+    boolean awaitIdleBounded(long timeoutMillis) {
+        long deadline = timeoutMillis > 0L ? System.nanoTime() + timeoutMillis * 1_000_000L : 0L;
         synchronized (taskLock) {
             while (activeTasks != 0) {
+                long waitMillis = deadline == 0L ? 0L : Math.max((deadline - System.nanoTime()) / 1_000_000L, 0L);
+                if (deadline != 0L && waitMillis == 0L) {
+                    return false;
+                }
                 try {
-                    taskLock.wait();
+                    if (waitMillis == 0L) {
+                        taskLock.wait();
+                    } else {
+                        taskLock.wait(waitMillis);
+                    }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new IllegalStateException("Interrupted waiting for RT light hierarchy tasks", e);
                 }
             }
         }
+        return true;
     }
 
     void destroyAfterDeviceIdle() {

@@ -6,6 +6,7 @@ import com.mojang.blaze3d.vertex.QuadInstance;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import dev.comfyfluffy.caustica.CausticaConfig;
 import dev.comfyfluffy.caustica.CausticaMod;
+import dev.comfyfluffy.caustica.rt.RtShutdown;
 import dev.comfyfluffy.caustica.rt.RtComposite;
 import dev.comfyfluffy.caustica.rt.RtContext;
 import dev.comfyfluffy.caustica.rt.RtDebugLabels;
@@ -1240,17 +1241,34 @@ public final class RtTerrain {
         }
     }
 
-    private void awaitActiveTasks() {
+    /**
+     * Waits for every in-flight terrain task to report back, bounded by the shutdown budget when a teardown
+     * is running. False means tasks are still outstanding: their results and tokens are then left alone.
+     */
+    private boolean awaitActiveTasks() {
         synchronized (activeTaskLock) {
             while (activeTasks != 0) {
+                long remaining = RtShutdown.remainingMillis();
+                if (!RtShutdown.active() && activeTasks != 0) {
+                    remaining = 0L; // not a teardown: keep the historical unbounded wait
+                }
                 try {
-                    activeTaskLock.wait();
+                    if (remaining == 0L) {
+                        if (RtShutdown.active()) {
+                            RtShutdown.timeout("RT terrain tasks", "their results and tokens are left alone");
+                            return false;
+                        }
+                        activeTaskLock.wait();
+                        continue;
+                    }
+                    activeTaskLock.wait(remaining);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new IllegalStateException("Interrupted while joining RT terrain tasks", e);
                 }
             }
         }
+        return true;
     }
 
     /**
@@ -1644,12 +1662,17 @@ public final class RtTerrain {
     }
 
     /** Join outstanding worker/GPU tasks and destroy every unpublished terminal result. */
-    private void drainTasksForClear(RtContext ctx) {
+    private boolean drainTasksForClear(RtContext ctx) {
         // A dead executor cannot make further task progress. Throw on the render thread before waiting;
         // its failure path has already terminally failed every accepted queued build.
         ctx.gpuExecutor().throwIfFailed();
-        awaitActiveTasks();
-        lightGrid.awaitIdle();
+        if (!awaitActiveTasks()) {
+            return false;
+        }
+        if (!lightGrid.awaitIdleBounded(RtShutdown.remainingMillis())) {
+            RtShutdown.timeout("RT light hierarchy tasks", "terrain teardown stops before freeing GPU resources");
+            return false;
+        }
         Throwable failure = null;
         SectionResult result;
         while ((result = completedBuilds.poll()) != null) {
@@ -1665,6 +1688,7 @@ public final class RtTerrain {
         if (failure != null) {
             throw new RuntimeException("RT terrain worker/build failed during teardown", failure);
         }
+        return true;
     }
 
     /** Full teardown (world exit / shutdown): drain the GPU, then free everything incl. an in-flight build. */
@@ -1675,12 +1699,25 @@ public final class RtTerrain {
         }
 
         // Device teardown is the one path that must prove every worker and GPU callback has relinquished
-        // its resources before the executor, allocator, and VkDevice disappear.
+        // its resources before the executor, allocator, and VkDevice disappear. Every wait here is bounded by
+        // the shutdown budget: the client is exiting, so a worker or a queue that never reports back must not
+        // be able to hold the render thread until Minecraft's shutdown watchdog kills the process.
+        long mark = RtShutdown.mark();
         terrainEpoch++;
         lightGrid.cancelPending();
-        drainTasksForClear(ctx);
+        if (!drainTasksForClear(ctx)) {
+            return;
+        }
+        RtShutdown.step("terrain tasks drained", mark);
+        mark = RtShutdown.mark();
         cancelAllDirtyGroups();
-        ctx.waitIdle();
+        if (!ctx.waitIdleBounded(RtShutdown.remainingMillis())) {
+            RtShutdown.timeout("RT GPU idle wait (terrain)", "queued frees are abandoned");
+            ctx.gpuExecutor().abandonPendingDestroys();
+            return;
+        }
+        RtShutdown.step("GPU idle", mark);
+        mark = RtShutdown.mark();
         ctx.gpuExecutor().flushDestroysAfterDeviceIdle();
         table.destroyRecycledGenerations();
         snapshots.clear();
