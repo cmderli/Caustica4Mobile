@@ -4,6 +4,7 @@
 import world_common;
 import display_common;
 import recon_common;
+import restir_common;
 
 struct WorldPushLayoutProbe {
     WorldPush values[2]; // array stride is the complete, tail-padded WorldPush byte size
@@ -17,9 +18,24 @@ struct ExposureStateLayoutProbe {
     ExposureState values[2]; // array stride is the complete, tail-padded ExposureState byte size
 };
 
+struct RestirReservoirLayoutProbe {
+    RestirReservoir values[2]; // array stride is the complete, tail-padded reservoir byte size
+};
+
+struct RestirPrimaryLayoutProbe {
+    RestirPrimary values[2]; // array stride is the complete, tail-padded primary record byte size
+};
+
+struct EmitterHistoryLayoutProbe {
+    EmitterHistory values[2]; // array stride is the complete, tail-padded emitter reservoir byte size
+};
+
 [[vk::binding(0, 0)]] StructuredBuffer<WorldPushLayoutProbe, Std430DataLayout> worldPushLayoutProbe;
 [[vk::binding(1, 0)]] StructuredBuffer<MaterialHeaderLayoutProbe, Std430DataLayout> materialHeaderLayoutProbe;
 [[vk::binding(2, 0)]] StructuredBuffer<ExposureStateLayoutProbe, Std430DataLayout> exposureStateLayoutProbe;
+[[vk::binding(3, 0)]] StructuredBuffer<RestirReservoirLayoutProbe, Std430DataLayout> restirReservoirLayoutProbe;
+[[vk::binding(4, 0)]] StructuredBuffer<RestirPrimaryLayoutProbe, Std430DataLayout> restirPrimaryLayoutProbe;
+[[vk::binding(5, 0)]] StructuredBuffer<EmitterHistoryLayoutProbe, Std430DataLayout> emitterHistoryLayoutProbe;
 [[vk::push_constant]] WorldPushConstants pushConstantsLayoutProbe;
 
 [shader("compute")]
@@ -30,6 +46,9 @@ void main(uint3 id : SV_DispatchThreadID) {
         float sink = worldPushLayoutProbe[0].values[0].invViewProj[0][0]
                 + materialHeaderLayoutProbe[0].values[0].params.x
                 + exposureStateLayoutProbe[0].values[0].previous
+                + restirReservoirLayoutProbe[0].values[0].wSum
+                + float(restirPrimaryLayoutProbe[0].values[0].flags)
+                + emitterHistoryLayoutProbe[0].values[0].pdf
                 + float(pushConstantsLayoutProbe.frameIndex);
     }
 }

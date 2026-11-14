@@ -31,6 +31,19 @@ final class RtWorldBackendTest {
     }
 
     /**
+     * The ray-tracing pipeline loads these raygen stages from the same resource directory. A missing
+     * stage only fails when a device with VK_KHR_ray_tracing_pipeline selects that backend, so the
+     * packaged set is pinned here.
+     */
+    @Test
+    void rayTracingEntryPointsArePackaged() throws IOException {
+        for (String shader : new String[]{"primary.rgen.spv", "indirect.rgen.spv",
+                "restir_temporal.rgen.spv", "restir_spatial.rgen.spv"}) {
+            assertNotNull(read(shader), "missing packaged ray-tracing shader " + SHADER_DIR + shader);
+        }
+    }
+
+    /**
      * Every thread of the ray-query dispatch owns exactly the pixel at its dispatch id, so the grid is
      * ceil(size / {@link RtPipeline#RAY_QUERY_GROUP_SIZE}) and each entry point bounds-checks against the
      * render target. A group edge larger than the dispatch assumes would leave the bottom-right of the
@@ -50,7 +63,9 @@ final class RtWorldBackendTest {
 
     private static String[] rayQueryShaders() {
         RtDeviceBringup.WorldBackend backend = RtDeviceBringup.WorldBackend.RAY_QUERY;
-        return new String[]{backend.rayQueryPrimaryShader, backend.rayQueryMainShader};
+        return new String[]{backend.rayQueryPrimaryShader, backend.rayQueryMainShader,
+                RtDeviceBringup.RAY_QUERY_RESTIR_TEMPORAL_SHADER,
+                RtDeviceBringup.RAY_QUERY_RESTIR_SPATIAL_SHADER};
     }
 
     private static byte[] read(String shader) throws IOException {

@@ -242,8 +242,10 @@ public final class RtNrd {
         try {
             pipelines.setImages(normals, depth, diffuseAlbedo, specularAlbedo, laneDiff, laneSpec,
                     normalRoughness, viewZ, diffIn, specIn, diffOut, specOut, out);
+            RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.NRD_FRONTEND);
             pipelines.recordFrontend(cmd, renderWidth, renderHeight, viewToClip.m22(), viewToClip.m32(),
                     HIT_DIST_A, HIT_DIST_B, HIT_DIST_C, DENOISING_RANGE, normalizeHitDistances());
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.NRD_FRONTEND);
 
             viewToClip.invert(clipToView);
             worldToView.invert(viewToWorld);
@@ -258,11 +260,19 @@ public final class RtNrd {
             } else {
                 worldToViewPrev.set(worldToView);
             }
-            if (!denoise(cmd, motion, jitterX, jitterY, worldToView, viewToClip, worldPrevToWorld)) {
+            // The shim records NRD's own dispatches into this command buffer, so the whole denoiser is one
+            // envelope around that call.
+            RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.NRD_CORE);
+            boolean denoised = denoise(cmd, motion, jitterX, jitterY, worldToView, viewToClip,
+                    worldPrevToWorld);
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.NRD_CORE);
+            if (!denoised) {
                 return false;
             }
 
+            RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.NRD_BACKEND);
             pipelines.recordBackend(cmd, renderWidth, renderHeight);
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.NRD_BACKEND);
             return true;
         } catch (Throwable t) {
             failed = true;

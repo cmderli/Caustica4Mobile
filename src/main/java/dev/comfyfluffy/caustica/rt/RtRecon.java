@@ -45,7 +45,7 @@ public final class RtRecon {
 
     // Render/display ratios per reconstruction quality step, in FfxApiUpscaleQualityMode order:
     // native-aa, quality, balanced, performance, ultra-performance.
-    private static final float[] QUALITY_RATIOS = {1.0f, 1.5f, 1.7f, 2.0f, 3.0f};
+    private static final float[] QUALITY_RATIOS = {1.0f, 1.5f, 1.7f, 2.0f, 3.0f, 4.0f};
     // Filters want their inputs aligned, and the widening taps stay whole when the render size is.
     private static final int RENDER_ALIGNMENT = 8;
 

@@ -512,6 +512,25 @@ public final class RtPipeline {
         return rayQuery;
     }
 
+    /**
+     * True when the pipeline was built with the ReSTIR PT entry points. They are omitted while the feature
+     * is off so its large shaders are never loaded or compiled by the driver. Temporal-only mode adds the
+     * temporal entry but not the spatial one.
+     */
+    public boolean hasRestirEntryPoints() {
+        return entryPointCount >= 3;
+    }
+
+    /** True when the optional spatial-reuse entry point was built after the temporal one. */
+    public boolean hasSpatialReuseEntryPoint() {
+        return entryPointCount >= 4;
+    }
+
+    /** Number of raygen/compute entry points; world indices are 0 primary, 1 indirect, 2 temporal, 3 spatial. */
+    public int entryPointCount() {
+        return entryPointCount;
+    }
+
     /** Bind a new TLAS after the selected descriptor slot's exact prior graphics use completes. */
     public void setTlas(long tlas, RtGpuExecutor.GraphicsUse graphicsUse,
                         RtGpuExecutor.GraphicsUseWaiter graphicsUseWaiter) {

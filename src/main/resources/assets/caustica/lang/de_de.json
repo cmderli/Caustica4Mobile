@@ -1,51 +1,39 @@
 {
 	"caustica.options.rt.header": "Raytracing",
-
 	"caustica.options.rt.exposureMode": "Belichtung",
 	"caustica.options.rt.exposureMode.tooltip": "Wie das Raytracing-Bild auf die Anzeigehelligkeit abgebildet wird. Automatisch passt sich der Szenenhelligkeit an; Manuell verwendet den Belichtungswert direkt.",
 	"caustica.options.rt.exposureMode.auto": "Automatisch",
 	"caustica.options.rt.exposureMode.manual": "Manuell",
-
 	"caustica.options.rt.manualEv": "Belichtung EV",
 	"caustica.options.rt.manualEv.tooltip": "Belichtungskorrektur in Blendenstufen. Im manuellen Modus ist dies die feste Belichtung. Im automatischen Modus verschiebt dies die automatische Belichtung heller oder dunkler.",
-
 	"caustica.options.rt.gamma": "Gamma",
 	"caustica.options.rt.gamma.tooltip": "Luminanz-Gamma nach der Transformation. Werte unter 1,00 hellen Schatten und Mitteltöne auf, während Schwarz, Weiß und die Farbverhältnisse erhalten bleiben.",
-
 	"caustica.options.rt.spp": "Samples pro Pixel",
 	"caustica.options.rt.spp.tooltip": "Pathtracing-Samples, die pro Pixel in jedem Frame genommen werden. Höhere Werte sind sauberer, aber anspruchsvoller.",
-
 	"caustica.options.rt.maxBounces": "Path-Bounces",
 	"caustica.options.rt.maxBounces.tooltip": "Maximale Anzahl sekundärer Pathtracing-Bounces nach dem Primärtreffer. Höhere Werte erfassen mehr indirektes Licht, kosten aber mehr Leistung.",
-
+	"caustica.options.rt.restir": "ReSTIR PT",
+	"caustica.options.rt.restir.tooltip": "Verwendet indirekte Pfade über Pixel und Frames hinweg wieder (ReSTIR PT). Schärferes indirektes Licht bei wenigen Samples; gilt nur für opake Primärtreffer.",
 	"caustica.options.rt.entities": "Raytracing-Entitäten",
 	"caustica.options.rt.entities.tooltip": "Entitäten und Blockentitäten in die Raytracing-Szene einbeziehen.",
-
 	"caustica.options.rt.particles": "Raytracing-Partikel",
 	"caustica.options.rt.particles.tooltip": "Zeichnet Partikel als Billboards entlang der Kamerastrahlen in der berechneten Szene.",
-
 	"caustica.options.rt.glow": "Leuchtkontur von Entitäten",
 	"caustica.options.rt.glow.tooltip": "Zeichnet die Vanilla-Kontur des Glowing-Effekts (durch Wände) um leuchtende Entitäten.",
-
 	"caustica.options.rt.waterWaves": "Animiertes Wasser",
 	"caustica.options.rt.waterWaves.tooltip": "Animiert Wasseroberflächen-Normalen für bewegte Wellenlichter.",
-
 	"caustica.options.rt.motionBlur": "Bewegungsunschärfe",
 	"caustica.options.rt.motionBlur.tooltip": "Verwischt das Bild entlang der echten Bewegungsvektoren jedes Pixels über die Belichtungszeit. Kameradrehungen und bewegte Objekte ziehen Schlieren wie bei einem Filmverschluss; Kosten: ein Durchgang in Bildschirmauflösung.",
 	"caustica.options.rt.motionBlurShutter": "Verschlusswinkel",
 	"caustica.options.rt.motionBlurShutter.tooltip": "Anteil des Bildintervalls, den der virtuelle Verschluss geöffnet bleibt, in Grad: 180 ist der Filmstandard (halbes Intervall), 360 lässt ihn durchgehend offen, 0 schaltet die Schlieren ab.",
 	"caustica.options.rt.motionBlurSamples": "Abtastwerte der Bewegungsunschärfe",
 	"caustica.options.rt.motionBlurSamples.tooltip": "Anzahl der entlang der Schliere gemittelten Abtastwerte. Mehr ist bei schnellen Bewegungen glatter; 8 ist ein guter Standardwert.",
-
 	"caustica.options.rt.hdr": "HDR-Ausgabe",
 	"caustica.options.rt.hdr.tooltip": "Erstellt die Swapchain für HDR (ST.2084/PQ) oder native SDR-Ausgabe neu. Wird an der nächsten Bildgrenze angewendet.",
-
 	"caustica.options.rt.hdrUiBrightness": "HDR-UI-Helligkeit",
 	"caustica.options.rt.hdrUiBrightness.tooltip": "Absolute Helligkeit (in Nits), die SDR-erstellter UI auf einem HDR-Bildschirm zugewiesen wird. BT.2408 setzt SDR-Grafikweiß auf 203 Nits; bei 1000 Nits Spitzenhelligkeit legt die ACES-HDR-Ausgabe eine weiße Fläche der Szene auf etwa 107 Nits.",
-
 	"caustica.options.rt.hdrPeak": "HDR-Spitzenhelligkeit",
 	"caustica.options.rt.hdrPeak.tooltip": "Absolute Helligkeit (in Nits), auf die Highlights zulaufen. Stelle sie auf die Spitzenhelligkeit deines HDR-Bildschirms ein.",
-
 	"caustica.options.rt.denoiser": "Denoiser",
 	"caustica.options.rt.denoiser.tooltip": "Welcher Denoiser das pfadverfolgte Bild aufräumt. Automatisch wählt den besten, den dieser Rechner ausführen kann. DLSS Ray Reconstruction braucht eine NVIDIA-RTX-GPU, NRD seine native Bibliothek, und der eingebaute Denoiser funktioniert immer, ist aber weicher, weil er keine Frame-Historie hat. Aus zeigt das rohe Tracing-Bild.",
 	"caustica.options.rt.denoiser.auto": "Automatisch",
@@ -53,7 +41,6 @@
 	"caustica.options.rt.denoiser.nrd": "NRD",
 	"caustica.options.rt.denoiser.builtin": "Eingebaut",
 	"caustica.options.rt.denoiser.off": "Aus",
-
 	"caustica.options.rt.superResolutionMethod": "Hochskalierungsmethode",
 	"caustica.options.rt.superResolutionMethod.tooltip": "Welche Hochskalierung das Bild in Renderauflösung auf deinen Bildschirm bringt. Automatisch nutzt FSR, wenn dessen Laufzeit installiert ist, sonst SGSR2. Bilinear funktioniert immer, ist aber weicher.",
 	"caustica.options.rt.superResolutionMethod.auto": "Automatisch",
@@ -68,7 +55,7 @@
 	"caustica.options.rt.superResolution.2": "Ausgeglichen",
 	"caustica.options.rt.superResolution.3": "Leistung",
 	"caustica.options.rt.superResolution.4": "Ultra-Leistung",
-
+	"caustica.options.rt.superResolution.5": "Extrem-Leistung",
 	"caustica.options.rt.debugView": "Debug-Ansicht",
 	"caustica.options.rt.debugView.tooltip": "Visualisiert einen Zwischenpuffer des Raytracings statt des finalen Bildes.",
 	"caustica.options.rt.debugView.0": "Aus",
@@ -80,5 +67,11 @@
 	"caustica.options.rt.debugView.6": "Spiegelnd",
 	"caustica.options.rt.debugView.7": "Spiegelnde Bewegung",
 	"caustica.options.rt.debugView.8": "Belichtungs-Falschfarben",
-	"caustica.options.rt.debugView.9": "Messgewichtung"
+	"caustica.options.rt.debugView.9": "Messgewichtung",
+	"caustica.options.rt.lightCandidates": "RIS-Lichtkandidaten",
+	"caustica.options.rt.lightCandidates.tooltip": "Pro beleuchtetem Oberflächenpunkt abgetastete Kandidaten für Blocklichter. Jeder Kandidat ist ein Schattenstrahl und damit der größte Stellhebel für die Strahlenzahl: Eine Verringerung senkt die Kosten nahezu linear und macht das direkte Licht leuchtender Blöcke verrauschter. 0 schaltet die Emitter-Abtastung ab und lässt nur das sichtbare Eigenleuchten übrig.",
+	"caustica.options.rt.gpuProfiling": "Frame-Profiler",
+	"caustica.options.rt.gpuProfiling.tooltip": "Protokolliert alle paar Sekunden die tatsächliche GPU-Zeit jeder Frame-Stufe (Pfadverfolgung, TLAS, NRD, SGSR2, Belichtung, Bloom, Ausgabe) und schreibt rt-frame-stats/gpu.csv. Damit lässt sich feststellen, welcher Durchgang die Bildrate kostet; sonst ausgeschaltet lassen.",
+	"caustica.options.rt.resetDefaults": "Caustica-Einstellungen zurücksetzen",
+	"caustica.options.rt.resetDefaults.tooltip": "Setzt alle Caustica-Einstellungen auf ihre Standardwerte zurück und schreibt config/caustica.toml neu. Die meisten Optionen gelten sofort; beim Start fest gelesene Einstellungen (Traversal-Backend, OMM, Worker-Threads, Kapazitäten) erst nach einem Neustart."
 }

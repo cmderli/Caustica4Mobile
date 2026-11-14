@@ -16,6 +16,7 @@ changes while the renderer is being built.
 - HDR output
 - Dynamic entity rendering in the ray-traced scene
 - LabPBR-style material support
+- ReSTIR PT spatiotemporal reuse of indirect path samples, on both traversal backends
 - OMM (Opacity Micro-Map) + SER (Shader Execution Reordering) optimizations
 
 ## Requirements
@@ -77,6 +78,70 @@ materials (including LabPBR roughness/metalness/F0/normal/SSS/emission, whose no
 `traversal.backend = "ray-query"` in `config/caustica.toml` to force the inline backend on hardware that
 could run either, for comparison.
 
+## ReSTIR PT
+
+When enabled, the indirect pass is resampled with ReSTIR PT (`shaders/pipelines/world/restir.slang`),
+and every pixel's indirect radiance is produced by a reservoir instead of by a fresh path. The
+implementation runs on both traversal backends: the ray-tracing pipeline dispatches
+`restir_temporal.rgen` and `restir_spatial.rgen` as raygen stages, while the ray-query backend dispatches
+the matching `restir_temporal_rq.comp` / `restir_spatial_rq.comp` compute entry points; both share the
+same body, hit/miss code and acceleration structures.
+
+The two passes are:
+
+- **Temporal** — generate this frame's path samples and merge the previous frame's reservoir after
+  reprojecting the primary surface, then write the base direct-lighting lanes.
+- **Spatial** — optional; shift reservoirs from a random disk of neighbors, cap confidence, shade the
+  survivor, add the resampled indirect radiance to the base lanes, and write this frame's history entry.
+
+With the default `restir.spatial-samples = 0` only the temporal pass runs: it shades the reservoir and
+writes history directly, so no scratch array, spatial dispatch or spatial shader module is needed.
+
+The primary pass publishes the visible surface's position, normal, view direction, material and entity
+motion into a 64 B record. Both reservoir passes read that record instead of tracing the camera ray again,
+so the feature adds no extra primary-ray traversal to the frame.
+
+Each reservoir stores a path sample split at its first indirect vertex `x2`. The sample keeps `x2`, the
+event that leaves it (a BSDF continuation, a sun/emitter connection, or the sky), the radiance that event
+delivers, and the target-function value for the pixel that owns it. Reuse keeps `x2` and the suffix
+fixed, reconnects the pixel's own visible surface `x1` to it, and re-evaluates the BSDF at both ends plus
+the reconnection Jacobian; a BSDF suffix reproduces the ordinary path tracer's throughput and texture
+LOD, and a light suffix reuses the light sample's visibility. Direct lighting at `x1` stays ordinary
+sun/emitter NEE and is not resampled.
+
+The implementation is the biased GRIS variant: reservoirs are merged with their resampling weights but
+without pairwise MIS, and a shifted BSDF suffix keeps the source sample's directional pdf. It is a
+noise-for-bias trade, not a reference renderer. ReSTIR PT is opt-in: check **ReSTIR PT** in Video Settings
+or set `restir.enabled = true` in `config/caustica.toml`; the ordinary per-pixel path tracer remains the
+default. Dielectric, particle, exact-mirror and submerged primary paths are also handed to the ordinary
+path tracer, so only opaque primary hits are resampled. The other settings in `config/caustica.toml` are
+`restir.spatial-samples` (default 0 = temporal-only), `restir.spatial-radius-pixels` (default 12),
+`restir.confidence-cap` (default 8), `restir.firefly-clamp` and `restir.temporal`. Each reservoir is
+96 B. Temporal-only keeps a 96 B history array, the 64 B primary record and a 4 B valid mask per render
+pixel (164 B/px) and shades directly in the temporal pass; setting `spatial-samples` above zero adds a
+96 B scratch array, the spatial pass and its shader module (260 B/px total). The arrays are allocated on
+the first frame after the feature is enabled. The two reservoir passes are the largest shaders in the
+project (the ray-query temporal entry inlines the path tracer), so a mobile driver may take noticeably
+longer to compile them or refuse them outright; temporal-only avoids loading the spatial shader, and the
+option should stay off where even the temporal shader cannot compile.
+
+Reservoir reuse validates the primary surface's position, normal and material, and spatial reuse excludes
+specular first-lobe and sharp low-roughness light-connection samples: shifting those across a smooth
+surface would spread one sun/sky highlight into a broad white patch. The hue-preserving
+`restir.firefly-clamp` (a pre-exposed luminance ceiling, defaulting to 2) and the confidence cap bound
+whatever a canonical or temporal sample still carries. Raising `restir.spatial-samples` or
+`restir.spatial-radius-pixels` buys smoother indirect light at the cost of neighbor shifts; lowering them
+localizes reuse.
+
+Emitter NEE (`lights.ris-candidates`) draws a power-weighted set of light candidates per shading point,
+which on a mobile GPU is the largest single cost of the path pass. `lights.temporal` (default on) carries one
+emitter sample per pixel across frames instead: the ordinary indirect pass keeps a 64 B record of the last
+selected sample in camera-relative space, re-evaluates it at the new shading point, and merges it with one
+fresh candidate before the single shadow ray. It is the same biased GRIS merge the ReSTIR path uses (no
+pairwise MIS). The history is cleared on a material epoch or when the published light count changes, so a
+removed emitter cannot keep shading; `lights.ris-candidates` still controls the fresh candidate count, with
+a nonzero value required for emitter sampling itself.
+
 Reconstruction is selectable in Video Settings. `auto` uses DLSS Ray Reconstruction where NGX can run,
 then the NRD denoiser when its native library is present, then the built-in denoiser. The built-in denoiser
 has no temporal history, so it is softer and noisier than the temporal denoisers at the same sample count.
@@ -134,6 +199,10 @@ DLSS features report themselves unavailable and reconstruction falls back to NRD
 - When HDR is enabled on Linux, Caustica selects GLFW's native Wayland backend automatically. X11/XWayland surfaces generally do not expose the required HDR10/PQ format.
 - If Minecraft falls back to OpenGL after a crash, re-enable the Vulkan backend
   before using Caustica again.
+- **Video Settings → Reset Caustica Settings** restores every option to its default and
+  rewrites `config/caustica.toml` with the comments a first launch writes. Most options apply
+  immediately; settings fixed at startup (traversal backend, OMM, worker threads, capacities)
+  take effect on the next launch. A `-Dcaustica.*` override still wins over the restored value.
 
 ### Java arguments
 
@@ -163,6 +232,25 @@ Bundled natives (the NRD shim) are unpacked into the app's own storage on Androi
 game: the platform's linker only opens libraries inside the app's namespace, so a copy under
 `/storage/emulated/0/...` is refused even when the device could run it.
 
+### Profiling a frame
+
+`[frame-stats]` in `config/caustica.toml` turns on the two halves of frame timing, both off by default:
+
+- `enabled` times the CPU side of every stage, logs a line for any frame slower than 1.5× the rolling
+  median, and writes `rt-frame-stats/frame.csv`.
+- `gpu` reads timestamp queries back from the device and logs the **executed** GPU time per stage every
+  couple of seconds (path trace, TLAS build, NRD front end/core/back end, each SGSR2 pass, exposure,
+  bloom, display map, copy), plus `rt-frame-stats/gpu.csv` for the per-frame rows.
+
+The GPU half is what tells a GPU-bound pass apart from one that merely records slowly; a stage shown in
+both is the nested breakdown, not additional cost. It is also switchable in Video Settings as **Frame
+Profiling**, which avoids editing the file on devices where that is awkward. With either option on, every
+few seconds also produces a `Frame rate: … fps …` line that states whether RT actually composited the frame
+(`rtComposite=`) alongside the render/display resolution, so a slow report taken with RT switched off is
+still readable. Every run additionally logs the effective configuration it is rendering with
+(`RT effective settings: …`), including the render resolution and the reconstruction backends that the
+configured `auto` values resolved to.
+
 ## Compatibility
 
 Caustica takes over the world renderer, so other mods that heavily modify world
@@ -188,9 +276,10 @@ license terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 - [ ] Nether/End sky, weather, volumetric fog/clouds
 - [ ] LOD
-- [ ] ReSTIR
+- [x] ReSTIR PT
 
 ## Special Thanks
 
 [ComfyFluffy](https://github.com/ComfyFluffy), for the original [Caustica](https://github.com/ComfyFluffy/Caustica) mod.
 [Tyuwwe](https://github.com/Tyuwwe/), for the implementation of SGSR2.
+[tauray](https://github.com/vga-group/tauray) (LGPL-2.1), consulted as a reference for ReSTIR PT; no tauray source is included.

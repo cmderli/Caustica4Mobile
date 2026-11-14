@@ -1,51 +1,39 @@
 {
 	"caustica.options.rt.header": "Трассировка лучей",
-
 	"caustica.options.rt.exposureMode": "Экспозиция",
 	"caustica.options.rt.exposureMode.tooltip": "Как изображение с трассировкой лучей сопоставляется с яркостью дисплея. Авто адаптируется к яркости сцены; Вручную использует значение экспозиции напрямую.",
 	"caustica.options.rt.exposureMode.auto": "Авто",
 	"caustica.options.rt.exposureMode.manual": "Вручную",
-
 	"caustica.options.rt.manualEv": "Экспозиция EV",
 	"caustica.options.rt.manualEv.tooltip": "Коррекция экспозиции в стопах. В ручном режиме это фиксированная экспозиция. В автоматическом режиме она сдвигает автоэкспозицию светлее или темнее.",
-
 	"caustica.options.rt.gamma": "Гамма",
 	"caustica.options.rt.gamma.tooltip": "Гамма яркости после преобразования. Значения ниже 1,00 осветляют тени и средние тона, сохраняя чёрный, белый и соотношения цветов.",
-
 	"caustica.options.rt.spp": "Сэмплов на пиксель",
 	"caustica.options.rt.spp.tooltip": "Сэмплы path tracing на пиксель в каждом кадре. Чем выше значение, тем чище изображение, но тем выше нагрузка.",
-
 	"caustica.options.rt.maxBounces": "Отскоки пути",
 	"caustica.options.rt.maxBounces.tooltip": "Максимальное число вторичных отскоков path tracing после первичного попадания. Более высокие значения захватывают больше непрямого света, но обходятся дороже.",
-
+	"caustica.options.rt.restir": "ReSTIR PT",
+	"caustica.options.rt.restir.tooltip": "Повторно использует непрямые пути между пикселями и кадрами (ReSTIR PT). Более чёткое непрямое освещение при малом числе выборок; применяется только к непрозрачным первичным попаданиям.",
 	"caustica.options.rt.entities": "Трассируемые сущности",
 	"caustica.options.rt.entities.tooltip": "Включает сущности и блочные сущности в сцену с трассировкой лучей.",
-
 	"caustica.options.rt.particles": "Трассируемые частицы",
 	"caustica.options.rt.particles.tooltip": "Рисует частицы как билборды вдоль лучей камеры внутри трассируемой сцены.",
-
 	"caustica.options.rt.glow": "Контур свечения сущностей",
 	"caustica.options.rt.glow.tooltip": "Рисует ванильный контур эффекта свечения (сквозь стены) вокруг светящихся сущностей.",
-
 	"caustica.options.rt.waterWaves": "Анимированная вода",
 	"caustica.options.rt.waterWaves.tooltip": "Анимирует нормали поверхности воды для движущихся бликов волн.",
-
 	"caustica.options.rt.motionBlur": "Размытие в движении",
 	"caustica.options.rt.motionBlur.tooltip": "Размывает изображение вдоль реальных векторов движения каждого пикселя за время выдержки. Повороты камеры и движущиеся объекты оставляют шлейф, как при плёночном затворе; цена — один проход в разрешении экрана.",
 	"caustica.options.rt.motionBlurShutter": "Угол затвора",
 	"caustica.options.rt.motionBlurShutter.tooltip": "Какая часть интервала между кадрами виртуальный затвор остаётся открытым, в градусах: 180 — плёночный стандарт (половина интервала), 360 — открыт постоянно, 0 — отключает шлейф.",
 	"caustica.options.rt.motionBlurSamples": "Сэмплы размытия в движении",
 	"caustica.options.rt.motionBlurSamples.tooltip": "Число отсчётов, усредняемых вдоль шлейфа. Чем больше, тем плавнее быстрое движение; 8 — хорошее значение по умолчанию.",
-
 	"caustica.options.rt.hdr": "Вывод HDR",
 	"caustica.options.rt.hdr.tooltip": "Пересоздаёт цепочку обмена для вывода HDR (ST.2084/PQ) или обычного SDR. Применяется на границе следующего кадра.",
-
 	"caustica.options.rt.hdrUiBrightness": "Яркость интерфейса HDR",
 	"caustica.options.rt.hdrUiBrightness.tooltip": "Абсолютная яркость (в нитах), назначаемая интерфейсу, созданному для SDR, на HDR-дисплее. BT.2408 задаёт белый цвет графики SDR на уровне 203 нит; при пике 1000 нит выходное HDR-преобразование ACES помещает белую поверхность в сцене примерно на 107 нит.",
-
 	"caustica.options.rt.hdrPeak": "Пиковая яркость HDR",
 	"caustica.options.rt.hdrPeak.tooltip": "Абсолютная яркость (в нитах), к которой сходятся яркие участки. Установите пиковую HDR-яркость вашего дисплея.",
-
 	"caustica.options.rt.denoiser": "Денойзер",
 	"caustica.options.rt.denoiser.tooltip": "Какой денойзер очищает изображение с трассировкой пути. Авто выбирает лучший из доступных на этой машине. DLSS Ray Reconstruction требует GPU NVIDIA RTX, NRD — свою нативную библиотеку, а встроенный денойзер работает всегда, но даёт более мягкую картинку, потому что у него нет истории кадров. Выкл. показывает необработанное трассированное изображение.",
 	"caustica.options.rt.denoiser.auto": "Авто",
@@ -53,7 +41,6 @@
 	"caustica.options.rt.denoiser.nrd": "NRD",
 	"caustica.options.rt.denoiser.builtin": "Встроенный",
 	"caustica.options.rt.denoiser.off": "Выкл.",
-
 	"caustica.options.rt.superResolutionMethod": "Метод суперразрешения",
 	"caustica.options.rt.superResolutionMethod.tooltip": "Какой апскейлер доводит изображение в разрешении рендера до вашего экрана. Авто использует FSR, если установлена его среда выполнения, иначе SGSR2. Билинейный работает всегда, но даёт более мягкую картинку.",
 	"caustica.options.rt.superResolutionMethod.auto": "Авто",
@@ -68,7 +55,7 @@
 	"caustica.options.rt.superResolution.2": "Баланс",
 	"caustica.options.rt.superResolution.3": "Производительность",
 	"caustica.options.rt.superResolution.4": "Ультра-производительность",
-
+	"caustica.options.rt.superResolution.5": "Экстремальная производительность",
 	"caustica.options.rt.debugView": "Отладочный вид",
 	"caustica.options.rt.debugView.tooltip": "Показывает промежуточный буфер трассировки лучей вместо финального изображения.",
 	"caustica.options.rt.debugView.0": "Выкл.",
@@ -80,5 +67,11 @@
 	"caustica.options.rt.debugView.6": "Зеркальность",
 	"caustica.options.rt.debugView.7": "Зеркальное движение",
 	"caustica.options.rt.debugView.8": "Ложный цвет экспозиции",
-	"caustica.options.rt.debugView.9": "Вес замера"
+	"caustica.options.rt.debugView.9": "Вес замера",
+	"caustica.options.rt.lightCandidates": "Кандидаты света RIS",
+	"caustica.options.rt.lightCandidates.tooltip": "Количество кандидатов света от блоков на каждую затеняемую точку поверхности. Каждый кандидат — это теневой луч, поэтому это главный параметр числа лучей: его снижение почти линейно уменьшает стоимость и делает прямой свет светящихся блоков шумнее. 0 отключает выборку источников, оставляя только их собственное свечение.",
+	"caustica.options.rt.gpuProfiling": "Профилирование кадра",
+	"caustica.options.rt.gpuProfiling.tooltip": "Каждые пару секунд записывает фактическое время GPU каждой стадии кадра (трассировка, TLAS, NRD, SGSR2, экспозиция, bloom, вывод) и пишет rt-frame-stats/gpu.csv. Нужно, чтобы понять, какой проход съедает FPS; в остальное время держите выключенным.",
+	"caustica.options.rt.resetDefaults": "Сбросить настройки Caustica",
+	"caustica.options.rt.resetDefaults.tooltip": "Возвращает все настройки Caustica к значениям по умолчанию и перезаписывает config/caustica.toml. Большинство применяется сразу; настройки, фиксируемые при запуске (бэкенд обхода, OMM, рабочие потоки, ёмкости), вступят в силу при следующем запуске."
 }

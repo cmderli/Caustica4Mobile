@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vulkan.VulkanCommandEncoder;
 
 import dev.comfyfluffy.caustica.rt.RtContext;
 import dev.comfyfluffy.caustica.rt.RtDebugLabels;
+import dev.comfyfluffy.caustica.rt.RtGpuProfile;
 import dev.comfyfluffy.caustica.rt.accel.RtImage;
 import dev.comfyfluffy.caustica.rt.gen.SgsrParamsData;
 import org.lwjgl.system.MemoryStack;
@@ -71,15 +72,18 @@ public final class RtSgsrPipelines {
         long nearest = createSampler(ctx, "sgsr nearest sampler", false);
         return new RtSgsrPipelines(ctx, linear, nearest,
                 new Pass(ctx, linear, nearest, "convert.comp.spv", "sgsr convert",
+                        RtGpuProfile.Stage.SGSR_CONVERT,
                         new int[] {SGSR_CONVERT_COLOR, SGSR_CONVERT_DEPTH, SGSR_CONVERT_VELOCITY,
                                 SGSR_CONVERT_ALPHA},
                         new boolean[] {true, true, true, true},
                         new int[] {SGSR_CONVERT_YCOCG_OUT, SGSR_CONVERT_MOTION_OUT}),
                 new Pass(ctx, linear, nearest, "activate.comp.spv", "sgsr activate",
+                        RtGpuProfile.Stage.SGSR_ACTIVATE,
                         new int[] {SGSR_ACTIVATE_LUMA_IN, SGSR_ACTIVATE_MOTION_IN, SGSR_ACTIVATE_YCOCG_IN},
                         new boolean[] {false, true, false},
                         new int[] {SGSR_ACTIVATE_MOTIONCLIP_OUT, SGSR_ACTIVATE_LUMA_OUT}),
                 new Pass(ctx, linear, nearest, "upscale.comp.spv", "sgsr upscale",
+                        RtGpuProfile.Stage.SGSR_UPSCALE,
                         new int[] {SGSR_UPSCALE_HISTORY_IN, SGSR_UPSCALE_MOTIONCLIP_IN, SGSR_UPSCALE_YCOCG_IN},
                         new boolean[] {true, true, false},
                         new int[] {SGSR_UPSCALE_HISTORY_OUT, SGSR_UPSCALE_SCENE_OUT}));
@@ -105,6 +109,7 @@ public final class RtSgsrPipelines {
     }
 
     private void record(VkCommandBuffer cmd, Pass pass, SgsrParamsData params, int width, int height) {
+        RtGpuProfile.INSTANCE.markStart(cmd, pass.stage);
         try (MemoryStack stack = MemoryStack.stackPush();
              RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, pass.label)) {
             VK10.vkCmdBindPipeline(cmd, VK10.VK_PIPELINE_BIND_POINT_COMPUTE, pass.pipeline);
@@ -116,6 +121,7 @@ public final class RtSgsrPipelines {
             VK10.vkCmdDispatch(cmd, (width + THREADS - 1) / THREADS, (height + THREADS - 1) / THREADS, 1);
             VulkanCommandEncoder.memoryBarrier(cmd, stack);
         }
+        RtGpuProfile.INSTANCE.markEnd(cmd, pass.stage);
     }
 
     public void destroy() {
@@ -154,6 +160,7 @@ public final class RtSgsrPipelines {
         private final long linearSampler;
         private final long nearestSampler;
         private final String label;
+        private final RtGpuProfile.Stage stage;
         private final int[] sampledBindings;
         private final boolean[] sampledLinear;
         private final int[] storageBindings;
@@ -165,11 +172,13 @@ public final class RtSgsrPipelines {
         private long[] boundViews = new long[0];
 
         private Pass(RtContext ctx, long linearSampler, long nearestSampler, String shader, String label,
-                     int[] sampledBindings, boolean[] sampledLinear, int[] storageBindings) {
+                     RtGpuProfile.Stage stage, int[] sampledBindings, boolean[] sampledLinear,
+                     int[] storageBindings) {
             this.ctx = ctx;
             this.linearSampler = linearSampler;
             this.nearestSampler = nearestSampler;
             this.label = label;
+            this.stage = stage;
             this.sampledBindings = sampledBindings;
             this.sampledLinear = sampledLinear;
             this.storageBindings = storageBindings;
@@ -230,11 +239,11 @@ public final class RtSgsrPipelines {
 
                 long module = loadModule(vk, stack, shader, label);
                 RtDebugLabels.name(ctx, VK10.VK_OBJECT_TYPE_SHADER_MODULE, module, label + " shader module");
-                VkPipelineShaderStageCreateInfo stage = VkPipelineShaderStageCreateInfo.calloc(stack)
+                VkPipelineShaderStageCreateInfo shaderStage = VkPipelineShaderStageCreateInfo.calloc(stack)
                         .sType$Default().stage(VK10.VK_SHADER_STAGE_COMPUTE_BIT).module(module)
                         .pName(stack.UTF8("main"));
                 VkComputePipelineCreateInfo.Buffer cpci = VkComputePipelineCreateInfo.calloc(1, stack);
-                cpci.get(0).sType$Default().stage(stage).layout(layout);
+                cpci.get(0).sType$Default().stage(shaderStage).layout(layout);
                 LongBuffer pPipeline = stack.mallocLong(1);
                 check(VK10.vkCreateComputePipelines(vk, VK10.VK_NULL_HANDLE, cpci, null, pPipeline),
                         "vkCreateComputePipelines(" + label + ")");

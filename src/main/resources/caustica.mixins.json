@@ -20,6 +20,7 @@
 		"ParticleEngineAccessor",
 		"RenderSetupAccessor",
 		"RenderTypeAccessor",
+		"ScreenInvoker",
 		"ScreenshotMixin",
 		"TextureAtlasAccessor",
 		"ParticleGroupAccessor",

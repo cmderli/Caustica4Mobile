@@ -15,6 +15,8 @@ import java.util.Locale;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.Options;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -49,6 +51,7 @@ public final class RtVideoOptions {
             gamma(),
             spp(),
             maxBounces(),
+            restir(),
             entities(),
             particles(),
             waterWaves(),
@@ -64,8 +67,34 @@ public final class RtVideoOptions {
             options.add(hdrUiBrightness());
             options.add(hdrPeak());
         }
+        options.add(lightCandidates());
+        options.add(gpuProfiling());
         options.add(debugView());
         return options.toArray(OptionInstance<?>[]::new);
+    }
+
+    /**
+     * Restores every Caustica setting and rewrites {@code config/caustica.toml} with the keys, defaults and
+     * comments a first launch writes. A change to the HDR toggle invalidates the surface so the swapchain is
+     * recreated in the restored format at the next safe frame boundary. {@code refreshScreen} rebuilds the
+     * option widgets, which otherwise keep showing the values they were built with.
+     */
+    public static Button resetDefaultsButton(Runnable refreshScreen) {
+        return Button.builder(
+                        Component.translatable("caustica.options.rt.resetDefaults"),
+                        button -> {
+                            boolean hdrBefore = CausticaConfig.Rt.Hdr.enabled();
+                            CausticaConfig.resetToDefaults();
+                            // HDR is a swapchain format, not a per-frame read: recreate the swapchain only
+                            // when the reset actually changed it, so every other reset stays hiccup-free.
+                            if (CausticaConfig.Rt.Hdr.enabled() != hdrBefore) {
+                                Minecraft.getInstance().invalidateSurfaceConfiguration();
+                            }
+                            refreshScreen.run();
+                        })
+                .tooltip(Tooltip.create(
+                        Component.translatable("caustica.options.rt.resetDefaults.tooltip")))
+                .build();
     }
 
     private static OptionInstance<String> exposureMode() {
@@ -126,9 +155,13 @@ public final class RtVideoOptions {
             "caustica.options.rt.maxBounces",
             OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.maxBounces.tooltip")),
             (caption, value) -> Options.genericValueLabel(caption, value),
-            new OptionInstance.IntRange(2, 8),
-            Math.clamp(setting.value(), 2, 8),
+            new OptionInstance.IntRange(1, 8),
+            Math.clamp(setting.value(), 1, 8),
             setting::set);
+    }
+
+    private static OptionInstance<Boolean> restir() {
+        return bool("caustica.options.rt.restir", CausticaConfig.Rt.Restir.ENABLED);
     }
 
     private static OptionInstance<Boolean> entities() {
@@ -222,7 +255,10 @@ public final class RtVideoOptions {
                 // Resolved when the value changes, not when the screen opened, so switching the denoiser
                 // above and then picking a mode writes to whichever backend is active by then.
                 if (RtRecon.INSTANCE.superResolutionIsDlss()) {
-                    CausticaConfig.Rt.DlssRr.QUALITY.set(DLSS_BY_MODE.get(position));
+                    // DLSS's ladder is shorter than the trace-resolution one; its strongest mode is the
+                    // ceiling for the extra step.
+                    CausticaConfig.Rt.DlssRr.QUALITY.set(
+                            DLSS_BY_MODE.get(Math.min(position, DLSS_BY_MODE.size() - 1)));
                 } else {
                     CausticaConfig.Rt.Reconstruction.QUALITY.set(modes.get(position));
                 }
@@ -306,6 +342,33 @@ public final class RtVideoOptions {
             new OptionInstance.IntRange(0, steps.size() - 1),
             Math.max(initialPosition, 0),
             position -> setting.set(steps.get(position)));
+    }
+
+    /**
+     * RIS emitter-NEE candidates per shaded vertex. Each candidate is one shadow ray, so this is the largest
+     * single ray-count multiplier in the path pass and the first knob to try when a device is ray-bound.
+     * 0 disables emitter NEE entirely (only the direct-hit emission term remains).
+     */
+    private static OptionInstance<Integer> lightCandidates() {
+        IntSetting setting = CausticaConfig.Rt.Lights.RIS_CANDIDATES;
+        return new OptionInstance<>(
+            "caustica.options.rt.lightCandidates",
+            OptionInstance.cachedConstantTooltip(
+                Component.translatable("caustica.options.rt.lightCandidates.tooltip")),
+            (caption, value) -> Options.genericValueLabel(caption, value),
+            new OptionInstance.IntRange(0, 8),
+            Math.clamp(setting.value(), 0, 8),
+            setting::set);
+    }
+
+    /**
+     * Turns on the executed-GPU-time report ({@link dev.comfyfluffy.caustica.rt.RtGpuProfile}). It lives in the
+     * UI rather than only in the config because a low frame rate cannot be attributed without it: the CPU-side
+     * timing in {@code frame-stats.enabled} records a dispatch in microseconds regardless of what it costs on
+     * the device. Off by default; the report is one log line every couple of seconds plus a CSV.
+     */
+    private static OptionInstance<Boolean> gpuProfiling() {
+        return bool("caustica.options.rt.gpuProfiling", CausticaConfig.Rt.FrameStats.GPU);
     }
 
     private static OptionInstance<Integer> debugView() {

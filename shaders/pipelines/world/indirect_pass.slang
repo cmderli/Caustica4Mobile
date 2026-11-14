@@ -19,7 +19,8 @@
 //
 // The body below is shared by both backends: indirect.rgen.slang is the ray-tracing entry point (with an
 // ordinary TraceRay form and an optional EXT SER variant) and indirect_rq.comp.slang dispatches the same
-// code as a compute grid over the render target.
+// code as a compute grid over the render target. restir.slang reuses tracePath for its suffix path; this
+// pass is also dispatched after ReSTIR's temporal pass and covers only the pixels ReSTIR hands back.
 import world_common;
 import world_core;
 import stage;
@@ -275,7 +276,7 @@ public PathRadiance tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
             if (risOn) {
                 float3 v = -rd;
                 Reservoir r = risInitial(hitPos, n, v, rd, albedo, float3(0.0, 0.0, 0.0), 1.0,
-                                         true, 0.0, seed, proposalSeed);
+                                         true, 0.0, worldPush.risCandidates, seed, proposalSeed);
                 float3 unusedSpecular;
                 Ldiff += throughput * shadeReservoir(r, hitPos, n, v, rd, albedo, float3(0.0, 0.0, 0.0), 1.0,
                                                      true, 0.0, unusedSpecular);
@@ -309,126 +310,20 @@ public PathRadiance tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
         float3 diffAlb = albedo * (1.0 - metal);
         float3 F0 = payload.f0;
 
-        // Emissive surfaces (lava, glowstone, torches, ...) add radiance directly, colored by albedo.
-        // RIS emitter NEE: the direct-hit emission term is gated only for emitters RIS actually samples
-        // (payload emitter-in-list bit) — and then only off diffuse continuation rays (showCelestial
-        // false), which the previous vertex's RIS already accounted for; the primary ray and
-        // specular/dielectric bounces (showCelestial true) still add it, since no emitter NEE happened
-        // along those. Emitters NOT in the light buffer (sparse/sub-threshold footprints, entities) are
-        // never NEE-sampled, so they always gather — bit-identical to the no-NEE path, no energy lost.
-        // Emission is already the full HDR luminance (look-package baseline or absolute cd/m² override
-        // multiplier baked in Java at material-compile time — see MaterialHeader.features packing).
-        float emission = payloadEmission();
-        // One gate drives both the RIS call below and the direct-hit emission suppression here. They must
-        // agree: gateEmitter exists only because RIS already accounted for this emitter, so a bounce where
-        // RIS is skipped must also gather emission directly or that light is lost outright.
-        bool gateEmitter = risOn && payloadEmitterInList();
-        if (emission > 0.0 && (!gateEmitter || showCelestial)) {
-            // A surface's own emission is a diffuse-class signal at the primary vertex; deeper in the path
-            // it is simply radiance arriving through the lane already chosen.
-            if (lane == 1) {
-                Lspec += throughput * albedo * emission;
-            } else {
-                Ldiff += throughput * albedo * emission;
-            }
+        // Emission, sun/moon NEE, RIS emitter NEE and thin-surface SSS transmission at this vertex. The
+        // helper owns the emitter-emission gate and the lane split so every caller shades one vertex the
+        // same way.
+        // Every vertex reuses the pixel's emitter sample; only the visible surface (hitDepth 0) owns the
+        // slot and writes it back for the next frame.
+        uint emitterHistoryIndex = 0xFFFFFFFFu;
+        if (worldPush.emitterHistoryAddr != 0
+                && pix.x < worldPush.renderWidth && pix.y < worldPush.renderHeight) {
+            emitterHistoryIndex = pix.y * worldPush.renderWidth + pix.x;
         }
-
-        // NEE: direct light from the dominant celestial body (sun by day, moon by night) — Lambert
-        // diffuse + GGX specular, one shadow ray. Jitter the light direction within its square angular
-        // extent (celestialLight.halfAngle) so the shadow ray samples the light's quad — soft penumbrae
-        // over accumulation. The same sampled direction drives ndl, the shadow ray, and the specular
-        // half-vector.
-        float3 lightDir = celestialLight.dir;
-        float lightHalfAngle = celestialLight.halfAngle;
-        if (lightHalfAngle > 0.0) {
-            lightDir = sampleSquare(lightDir, lightHalfAngle, seed);
-        }
-        float ndl = max(0.0, dot(n, lightDir));
-        if (ndl > 0.0) {
-            VisibilityResult shadow = visibility(p, lightDir, 10000.0);
-            float3 vis = shadow.transmittance;
-            // Underwater receiver whose shadow ray crossed a water surface: scale the direct light by
-            // the wave-refraction caustic at the exit point. Focusing scales the incident irradiance,
-            // so it applies to the whole NEE term (diffuse + specular).
-            if (medium.current.water && waterWaves && shadow.waterHitT > 0.0) {
-                vis *= waterCaustic(p + lightDir * shadow.waterHitT, lightDir, shadow.waterHitT);
-            }
-            if (max(vis.r, max(vis.g, vis.b)) > 0.0) {
-                float3 diffBrdf = diffAlb * INV_PI; // Lambertian diffuse (f = albedo/PI)
-                float3 h = normalize(lightDir + v);
-                float ndh = max(0.0, dot(n, h));
-                float ndv = max(1.0e-4, dot(n, v));
-                float vdh = max(0.0, dot(v, h));
-                float D = ggxD(ndh, rough);
-                float G = ggxG1(ndv, rough) * ggxG1(ndl, rough); // separable Smith masking
-                float3 F = fresnelSchlick(vdh, F0);
-                float3 specBrdf = (D * G) * F / (4.0 * ndv * ndl); // Cook–Torrance specular
-                float3 direct = throughput * celestialLight.illuminance * ndl * vis;
-                // One shadow ray serves both lobes, so at the primary vertex the term is split by BRDF
-                // component; anywhere deeper the whole term belongs to the lane already chosen.
-                if (lane < 0) {
-                    Ldiff += direct * diffBrdf;
-                    Lspec += direct * specBrdf;
-                } else if (lane == 1) {
-                    Lspec += direct * (diffBrdf + specBrdf);
-                } else {
-                    Ldiff += direct * (diffBrdf + specBrdf);
-                }
-            }
-        }
-
-        // RIS direct lighting from block emitters (single-frame only, no temporal reservoir reuse).
-        // Front lobe + SSS backlighting are resampled together and share ONE shadow ray — a light can
-        // only be in front of n or behind it, never both, so combining them into one target function is
-        // exact, not an approximation. The SSS term is gated off past MAX_SSS_INDIRECT_DEPTH by passing
-        // sss=0 there (falls back to plain front-only RIS).
-        if (risOn) {
-            float activeSss = hitDepth <= MAX_SSS_INDIRECT_DEPTH ? sss : 0.0;
-            Reservoir r = risInitial(hitPos, n, v, rd, diffAlb, F0, rough, false, activeSss,
-                                     seed, proposalSeed);
-            float3 risSpecular;
-            float3 risDiffuse = shadeReservoir(r, hitPos, n, v, rd, diffAlb, F0, rough, false,
-                                               activeSss, risSpecular);
-            float3 direct = throughput;
-            if (lane < 0) {
-                Ldiff += direct * risDiffuse;
-                Lspec += direct * risSpecular;
-            } else if (lane == 1) {
-                Lspec += direct * (risDiffuse + risSpecular);
-            } else {
-                Ldiff += direct * (risDiffuse + risSpecular);
-            }
-        }
-
-        // Thin-surface SSS transmission. Light entering from the back face scatters through toward the
-        // viewer via a forward-biased HG phase (leaves/grass backlit by the sun glow when you look
-        // through them toward the light source). Shadow ray fires from the back face to avoid
-        // self-occlusion. cosT = dot(lightDir, rd): rd tracks the ray toward the sun when the sun is
-        // behind the slab, giving cosT ≈ 1 → forward-scatter peak.
-        if (sss > 0.0 && hitDepth <= MAX_SSS_INDIRECT_DEPTH) {
-            float backNdl = max(0.0, dot(-n, lightDir));
-            if (backNdl > 0.0) {
-                VisibilityResult shadowBack = visibility(hitPos - n * SURF_BIAS, lightDir, 10000.0);
-                float3 visB = shadowBack.transmittance;
-                // Same caustic as the front-face NEE — underwater kelp/seagrass transmission should
-                // flicker with the same light bands as the floor around it.
-                if (medium.current.water && waterWaves && shadowBack.waterHitT > 0.0) {
-                    visB *= waterCaustic(hitPos + lightDir * shadowBack.waterHitT,
-                                         lightDir, shadowBack.waterHitT);
-                }
-                if (max(visB.r, max(visB.g, visB.b)) > 0.0) {
-                    float cosT = dot(lightDir, rd);
-                    // Forward-scatter transmission is diffuse-class energy.
-                    float3 transmission = throughput * diffAlb * sss * SSS_STRENGTH * hg(cosT, SSS_G)
-                            * backNdl * celestialLight.illuminance * visB;
-                    if (lane == 1) {
-                        Lspec += transmission;
-                    } else {
-                        Ldiff += transmission;
-                    }
-                }
-            }
-        }
+        shadeDirectLighting(hitPos, n, v, rd, throughput, albedo, diffAlb, F0, rough, sss,
+                payloadEmission(), payloadEmitterInList(), lane, hitDepth,
+                risOn && (hitDepth == 0 || worldPush.lightBounceRis != 0u), showCelestial,
+                medium, waterWaves, emitterHistoryIndex, hitDepth == 0, seed, proposalSeed, Ldiff, Lspec);
 
         // Preserve all local lighting at the terminal hit, but do not sample a continuation that the
         // bounce loop cannot trace.
@@ -499,6 +394,16 @@ public PathRadiance tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
 
 public void indirectPass(uint2 dispatchIndex, uint2 dimensions) {
     worldPush = ConstPtr<WorldPush>(pc.worldPushAddr)[0];
+    // With ReSTIR PT enabled this dispatch follows the temporal pass and only owns the pixels ReSTIR
+    // handed back to the ordinary path tracer (dielectrics, particles, mirrors, misses, and failed
+    // samples). The temporal pass publishes a one-uint valid mask; a set pixel already has its reservoir
+    // shaded (temporal-only) or pending shading (spatial), so the fallback must leave it alone.
+    if (pc.restirMaskAddr != 0) {
+        uint restirPixel = dispatchIndex.y * dimensions.x + dispatchIndex.x;
+        if (DevicePtr<uint>(pc.restirMaskAddr)[restirPixel] != 0u) {
+            return;
+        }
+    }
     // Derive this dispatch's directional light once. The same transmittance LUT drives terrain lighting
     // and the visible sun/moon, keeping atmospheric tint consistent across both consumers.
     celestialLight = dominantCelestialLight(skyState(worldPush), transmittanceLut);

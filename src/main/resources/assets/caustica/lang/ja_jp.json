@@ -1,51 +1,39 @@
 {
 	"caustica.options.rt.header": "レイトレーシング",
-
 	"caustica.options.rt.exposureMode": "露出",
 	"caustica.options.rt.exposureMode.tooltip": "レイトレーシング画像をディスプレイの明るさにどう変換するかを設定します。自動はシーンの輝度に合わせて調整し、手動は露出値をそのまま使用します。",
 	"caustica.options.rt.exposureMode.auto": "自動",
 	"caustica.options.rt.exposureMode.manual": "手動",
-
 	"caustica.options.rt.manualEv": "露出 EV",
 	"caustica.options.rt.manualEv.tooltip": "露出補正を段数で指定します。手動では固定露出として使い、自動では自動露出を明るくまたは暗く補正します。",
-
 	"caustica.options.rt.gamma": "ガンマ",
 	"caustica.options.rt.gamma.tooltip": "変換後の輝度ガンマ。1.00 未満の値は黒・白・色の比率を保ったまま、影と中間調を明るくします。",
-
 	"caustica.options.rt.spp": "ピクセルあたりのサンプル数",
 	"caustica.options.rt.spp.tooltip": "各フレームでピクセルごとに取得するパストレーシングサンプル数。高いほどきれいですが負荷が増えます。",
-
 	"caustica.options.rt.maxBounces": "パスのバウンス数",
 	"caustica.options.rt.maxBounces.tooltip": "最初のヒット後に行う二次パストレーシングバウンスの最大数。高いほど間接光を多く捉えますが、負荷も増えます。",
-
+	"caustica.options.rt.restir": "ReSTIR PT",
+	"caustica.options.rt.restir.tooltip": "間接パスをピクセル間・フレーム間で再利用します（ReSTIR PT）。少ないサンプル数でも間接光が鮮明になります。不透明な一次ヒットのみが対象です。",
 	"caustica.options.rt.entities": "レイトレーシング対象エンティティ",
 	"caustica.options.rt.entities.tooltip": "エンティティとブロックエンティティをレイトレーシングシーンに含めます。",
-
 	"caustica.options.rt.particles": "レイトレーシング対象パーティクル",
 	"caustica.options.rt.particles.tooltip": "トレースされたシーン内で、パーティクルをカメラレイに沿ったビルボードとして描画します。",
-
 	"caustica.options.rt.glow": "エンティティの発光アウトライン",
 	"caustica.options.rt.glow.tooltip": "発光中のエンティティに、バニラの発光効果アウトライン（壁越し）を描画します。",
-
 	"caustica.options.rt.waterWaves": "アニメーションする水",
 	"caustica.options.rt.waterWaves.tooltip": "水面の法線をアニメーションさせ、動く波のハイライトを表示します。",
-
 	"caustica.options.rt.motionBlur": "モーションブラー",
 	"caustica.options.rt.motionBlur.tooltip": "各ピクセルの実際のモーションベクターに沿って、シャッター時間ぶん画像をぼかします。カメラの回転や動く物体がフィルムのシャッターのように尾を引きます。コストは表示解像度のパス1回です。",
 	"caustica.options.rt.motionBlurShutter": "シャッター角度",
 	"caustica.options.rt.motionBlurShutter.tooltip": "仮想シャッターがフレーム間隔のうち開いている割合（度）。180 がフィルム標準（半分）、360 で常時開放、0 で尾を引かなくなります。",
 	"caustica.options.rt.motionBlurSamples": "モーションブラーのサンプル数",
 	"caustica.options.rt.motionBlurSamples.tooltip": "尾に沿って平均するサンプル数です。多いほど速い動きが滑らかになります。8 が適切な既定値です。",
-
 	"caustica.options.rt.hdr": "HDR 出力",
 	"caustica.options.rt.hdr.tooltip": "HDR (ST.2084/PQ) またはネイティブ SDR 出力用にスワップチェーンを再作成します。次のフレーム境界で適用されます。",
-
 	"caustica.options.rt.hdrUiBrightness": "HDR UI の明るさ",
 	"caustica.options.rt.hdrUiBrightness.tooltip": "HDR ディスプレイ上で SDR 向け UI に割り当てる絶対輝度（nits）。BT.2408 は SDR グラフィックスの白を 203 nits とし、ピーク 1000 nits のとき ACES の HDR 出力変換はシーン内の白い面を約 107 nits に置きます。",
-
 	"caustica.options.rt.hdrPeak": "HDR ピーク輝度",
 	"caustica.options.rt.hdrPeak.tooltip": "ハイライトがロールオフする先の絶対輝度（nits）です。ディスプレイの HDR ピーク輝度に設定してください。",
-
 	"caustica.options.rt.denoiser": "デノイザー",
 	"caustica.options.rt.denoiser.tooltip": "パストレース画像をどのデノイザーで整えるかを選びます。自動はこの環境で実行できる最良のものを選びます。DLSS レイ再構成には NVIDIA RTX GPU、NRD には専用のネイティブライブラリが必要です。内蔵デノイザーは常に使えますが、フレーム履歴がないため滑らかさで劣ります。オフでは生のトレース画像を表示します。",
 	"caustica.options.rt.denoiser.auto": "自動",
@@ -53,7 +41,6 @@
 	"caustica.options.rt.denoiser.nrd": "NRD",
 	"caustica.options.rt.denoiser.builtin": "内蔵",
 	"caustica.options.rt.denoiser.off": "オフ",
-
 	"caustica.options.rt.superResolutionMethod": "超解像方式",
 	"caustica.options.rt.superResolutionMethod.tooltip": "レンダリング解像度の画像を画面に届けるアップスケーラーを選びます。自動は FSR ランタイムがあれば FSR を、なければ SGSR2 を使います。バイリニアは常に動きますが滑らかさで劣ります。",
 	"caustica.options.rt.superResolutionMethod.auto": "自動",
@@ -68,7 +55,7 @@
 	"caustica.options.rt.superResolution.2": "バランス",
 	"caustica.options.rt.superResolution.3": "パフォーマンス",
 	"caustica.options.rt.superResolution.4": "ウルトラパフォーマンス",
-
+	"caustica.options.rt.superResolution.5": "エクストリームパフォーマンス",
 	"caustica.options.rt.debugView": "デバッグ表示",
 	"caustica.options.rt.debugView.tooltip": "最終画像の代わりに、レイトレーシングの中間バッファを可視化します。",
 	"caustica.options.rt.debugView.0": "オフ",
@@ -80,5 +67,11 @@
 	"caustica.options.rt.debugView.6": "スペキュラー",
 	"caustica.options.rt.debugView.7": "スペキュラーモーション",
 	"caustica.options.rt.debugView.8": "露出フォルスカラー",
-	"caustica.options.rt.debugView.9": "測光ウェイト"
+	"caustica.options.rt.debugView.9": "測光ウェイト",
+	"caustica.options.rt.lightCandidates": "RIS ライト候補数",
+	"caustica.options.rt.lightCandidates.tooltip": "陰影計算する表面点ごとにサンプリングするブロック光源の候補数。各候補は 1 本のシャドウレイなので、レイ本数を左右する最大の設定です。下げるとほぼ線形に負荷が減り、発光ブロックからの直接光がノイズっぽくなります。0 にするとエミッタサンプリングを無効化し、発光体自身の見た目の明るさだけが残ります。",
+	"caustica.options.rt.gpuProfiling": "フレームプロファイリング",
+	"caustica.options.rt.gpuProfiling.tooltip": "数秒ごとに各フレーム段階（パストレース、TLAS、NRD、SGSR2、露出、ブルーム、表示）の実際の GPU 時間を記録し、rt-frame-stats/gpu.csv に書き出します。低いフレームレートの原因のパスを特定するための機能で、通常はオフのままにしてください。",
+	"caustica.options.rt.resetDefaults": "Caustica 設定をリセット",
+	"caustica.options.rt.resetDefaults.tooltip": "すべての Caustica 設定を既定値に戻し、config/caustica.toml を書き直します。ほとんどの設定は即座に反映されます。起動時に固定される設定（トラバーサルバックエンド、OMM、ワーカースレッド、各種容量）は次回起動時から反映されます。"
 }

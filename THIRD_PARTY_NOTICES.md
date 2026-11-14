@@ -92,3 +92,13 @@ Caustica's `caustica_nrd` shim is project-owned glue code and follows Caustica's
 project license unless otherwise noted. Its host-side shader ports
 (`shaders/pipelines/nrd_frontend`, `shaders/pipelines/nrd_backend`) reimplement
 encoding helpers described in NRD's `NRD.hlsli` and carry the same notice.
+
+---
+
+## ReSTIR PT reference
+
+The ReSTIR PT reservoir passes are an original implementation of the generalized
+resampling algorithm described by Lin et al., "Generalized Resampling for Path
+Tracing" (2022). [tauray](https://github.com/vga-group/tauray) (LGPL-2.1) was
+consulted as a reference for the algorithm and its reservoir bookkeeping. No
+tauray source code is included in this repository or its build outputs.

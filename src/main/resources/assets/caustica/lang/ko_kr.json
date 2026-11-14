@@ -1,51 +1,39 @@
 {
 	"caustica.options.rt.header": "레이 트레이싱",
-
 	"caustica.options.rt.exposureMode": "노출",
 	"caustica.options.rt.exposureMode.tooltip": "레이 트레이싱 이미지가 디스플레이 밝기에 매핑되는 방식을 정합니다. 자동은 장면 휘도에 맞춰 조정하고, 수동은 노출 값을 그대로 사용합니다.",
 	"caustica.options.rt.exposureMode.auto": "자동",
 	"caustica.options.rt.exposureMode.manual": "수동",
-
 	"caustica.options.rt.manualEv": "노출 EV",
 	"caustica.options.rt.manualEv.tooltip": "스톱 단위의 노출 보정입니다. 수동에서는 고정 노출로 사용되며, 자동에서는 자동 노출을 더 밝거나 어둡게 보정합니다.",
-
 	"caustica.options.rt.gamma": "감마",
 	"caustica.options.rt.gamma.tooltip": "변환 후 휘도 감마입니다. 1.00 미만의 값은 검정, 흰색, 색 비율을 유지하면서 그림자와 중간톤을 밝게 합니다.",
-
 	"caustica.options.rt.spp": "픽셀당 샘플 수",
 	"caustica.options.rt.spp.tooltip": "각 프레임에서 픽셀마다 사용하는 패스 트레이싱 샘플 수입니다. 높을수록 깨끗하지만 더 많은 성능이 필요합니다.",
-
 	"caustica.options.rt.maxBounces": "경로 바운스",
 	"caustica.options.rt.maxBounces.tooltip": "첫 번째 충돌 이후의 보조 패스 트레이싱 바운스 최대 수입니다. 높을수록 더 많은 간접광을 포착하지만 비용이 증가합니다.",
-
+	"caustica.options.rt.restir": "ReSTIR PT",
+	"caustica.options.rt.restir.tooltip": "간접 경로를 픽셀과 프레임 간에 재사용합니다(ReSTIR PT). 적은 샘플 수에서도 간접광이 더 선명해집니다. 불투명한 첫 번째 충돌에만 적용됩니다.",
 	"caustica.options.rt.entities": "레이 트레이싱 엔티티",
 	"caustica.options.rt.entities.tooltip": "레이 트레이싱 장면에 엔티티와 블록 엔티티를 포함합니다.",
-
 	"caustica.options.rt.particles": "레이 트레이싱 파티클",
 	"caustica.options.rt.particles.tooltip": "트레이싱된 장면 안에서 파티클을 카메라 광선 빌보드로 그립니다.",
-
 	"caustica.options.rt.glow": "엔티티 발광 윤곽선",
 	"caustica.options.rt.glow.tooltip": "발광 중인 엔티티 주위에 바닐라 발광 효과 윤곽선(벽 너머 표시)을 그립니다.",
-
 	"caustica.options.rt.waterWaves": "애니메이션 물",
 	"caustica.options.rt.waterWaves.tooltip": "움직이는 물결 하이라이트를 위해 물 표면 노멀을 애니메이션합니다.",
-
 	"caustica.options.rt.motionBlur": "모션 블러",
 	"caustica.options.rt.motionBlur.tooltip": "각 픽셀의 실제 모션 벡터를 따라 셔터 시간 동안 이미지를 흐리게 합니다. 카메라 회전과 움직이는 물체가 필름 셔터처럼 꼬리를 남깁니다. 비용은 화면 해상도 패스 한 번입니다.",
 	"caustica.options.rt.motionBlurShutter": "셔터 각도",
 	"caustica.options.rt.motionBlurShutter.tooltip": "가상 셔터가 프레임 간격 중 열려 있는 비율(도)입니다. 180은 필름 표준(절반), 360은 항상 열림, 0은 꼬리를 끕니다.",
 	"caustica.options.rt.motionBlurSamples": "모션 블러 샘플 수",
 	"caustica.options.rt.motionBlurSamples.tooltip": "꼬리를 따라 평균할 샘플 수입니다. 많을수록 빠른 움직임이 매끄럽습니다. 8이 적절한 기본값입니다.",
-
 	"caustica.options.rt.hdr": "HDR 출력",
 	"caustica.options.rt.hdr.tooltip": "HDR(ST.2084/PQ) 또는 기본 SDR 출력용으로 스왑체인을 다시 만듭니다. 다음 프레임 경계에서 적용됩니다.",
-
 	"caustica.options.rt.hdrUiBrightness": "HDR UI 밝기",
 	"caustica.options.rt.hdrUiBrightness.tooltip": "HDR 디스플레이에서 SDR용으로 만든 UI에 지정하는 절대 밝기(nits)입니다. BT.2408은 SDR 그래픽 흰색을 203nits로 두고, 1000nits 피크에서 ACES HDR 출력 변환은 장면의 흰 표면을 약 107nits에 놓습니다.",
-
 	"caustica.options.rt.hdrPeak": "HDR 최대 밝기",
 	"caustica.options.rt.hdrPeak.tooltip": "하이라이트가 롤오프되는 대상 절대 밝기(nits)입니다. 디스플레이의 최대 HDR 밝기에 맞추세요.",
-
 	"caustica.options.rt.denoiser": "디노이저",
 	"caustica.options.rt.denoiser.tooltip": "어떤 디노이저로 패스트레이싱 이미지를 정리할지 정합니다. 자동은 이 환경에서 실행할 수 있는 가장 좋은 것을 고릅니다. DLSS 레이 재구성은 NVIDIA RTX GPU가, NRD는 전용 네이티브 라이브러리가 필요합니다. 내장 디노이저는 항상 동작하지만 프레임 기록이 없어 더 흐릿합니다. 끄면 원본 추적 이미지를 표시합니다.",
 	"caustica.options.rt.denoiser.auto": "자동",
@@ -53,7 +41,6 @@
 	"caustica.options.rt.denoiser.nrd": "NRD",
 	"caustica.options.rt.denoiser.builtin": "내장",
 	"caustica.options.rt.denoiser.off": "끄기",
-
 	"caustica.options.rt.superResolutionMethod": "초해상도 방식",
 	"caustica.options.rt.superResolutionMethod.tooltip": "어떤 업스케일러로 렌더링 해상도 이미지를 화면까지 가져올지 정합니다. 자동은 FSR 런타임이 설치되어 있으면 FSR을, 아니면 SGSR2를 사용합니다. 바이리니어는 항상 동작하지만 더 흐릿합니다.",
 	"caustica.options.rt.superResolutionMethod.auto": "자동",
@@ -68,7 +55,7 @@
 	"caustica.options.rt.superResolution.2": "균형",
 	"caustica.options.rt.superResolution.3": "성능",
 	"caustica.options.rt.superResolution.4": "울트라 성능",
-
+	"caustica.options.rt.superResolution.5": "익스트림 성능",
 	"caustica.options.rt.debugView": "디버그 보기",
 	"caustica.options.rt.debugView.tooltip": "최종 이미지 대신 중간 레이 트레이싱 버퍼를 시각화합니다.",
 	"caustica.options.rt.debugView.0": "꺼짐",
@@ -80,5 +67,11 @@
 	"caustica.options.rt.debugView.6": "스페큘러",
 	"caustica.options.rt.debugView.7": "스페큘러 모션",
 	"caustica.options.rt.debugView.8": "노출 의사 색상",
-	"caustica.options.rt.debugView.9": "측광 가중치"
+	"caustica.options.rt.debugView.9": "측광 가중치",
+	"caustica.options.rt.lightCandidates": "RIS 광원 후보 수",
+	"caustica.options.rt.lightCandidates.tooltip": "음영 처리되는 표면 지점마다 샘플링하는 블록 광원 후보 수입니다. 후보 하나가 그림자 광선 하나이므로 광선 수를 좌우하는 가장 큰 설정입니다. 낮추면 비용이 거의 선형으로 줄고 발광 블록의 직접광이 더 노이즈해집니다. 0이면 발광체 샘플링을 끄고 발광체 자체의 밝기만 남습니다.",
+	"caustica.options.rt.gpuProfiling": "프레임 프로파일링",
+	"caustica.options.rt.gpuProfiling.tooltip": "몇 초마다 각 프레임 단계(경로 추적, TLAS, NRD, SGSR2, 노출, 블룸, 표시)의 실제 GPU 시간을 기록하고 rt-frame-stats/gpu.csv에 저장합니다. 낮은 프레임레이트가 어느 패스에서 나오는지 확인할 때만 켜 두세요.",
+	"caustica.options.rt.resetDefaults": "Caustica 설정 초기화",
+	"caustica.options.rt.resetDefaults.tooltip": "모든 Caustica 설정을 기본값으로 되돌리고 config/caustica.toml을 다시 씁니다. 대부분은 즉시 적용되며, 시작할 때 고정되는 설정(순회 백엔드, OMM, 작업 스레드, 용량)은 다음 실행부터 적용됩니다."
 }

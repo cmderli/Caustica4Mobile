@@ -56,12 +56,40 @@ public final class CausticaConfig {
     public static void ensureRegistered() {
         @SuppressWarnings("unused")
         Object[] touch = {
-            Rt.ENABLED, Rt.Composite.SPP, Rt.Composite.MAX_BOUNCES, Rt.Terrain.ASYNC_DISPATCH_PER_PASS, Rt.Omm.ENABLED,
-            Rt.Entities.ENABLED, Rt.Entities.GLOW_ENABLED, Rt.EntityTextures.MAX_TEXTURES, Rt.DlssRr.ENABLED, Rt.Fg.ENABLED,
-            Rt.Reflex.ENABLED, Rt.Exposure.MODE, Rt.Tonemap.GAMMA, Rt.FrameStats.ENABLED,
-            Rt.Screenshots.EXR_ENABLED, Rt.Hdr.ENABLED, Rt.MotionBlur.ENABLED, Ngx.PATH, Fsr.PATH, Nrd.PATH,
-            Rt.Reconstruction.DENOISER,
+            Rt.ENABLED, Rt.Composite.SPP, Rt.Composite.MAX_BOUNCES, Rt.Terrain.ASYNC_DISPATCH_PER_PASS,
+            Rt.Lights.RIS_CANDIDATES, Rt.Omm.ENABLED, Rt.Traversal.BACKEND,
+            Rt.Entities.ENABLED, Rt.Entities.GLOW_ENABLED, Rt.EntityTextures.MAX_TEXTURES,
+            Rt.Overlay.BLOCK_OUTLINE_ENABLED, Rt.DlssRr.ENABLED, Rt.Fg.ENABLED,
+            Rt.Reflex.ENABLED, Rt.Exposure.MODE, Rt.Tonemap.GAMMA, Rt.MotionBlur.ENABLED,
+            Rt.FrameStats.ENABLED, Rt.Screenshots.EXR_ENABLED, Rt.Hdr.ENABLED,
+            Rt.Diagnostics.HEAVY_CRASH_DIAGNOSTICS, Rt.Reconstruction.DENOISER, Rt.Restir.ENABLED,
+            Ngx.PATH, Fsr.PATH, Nrd.PATH,
         };
+    }
+
+    /**
+     * Restores every registered setting to its hardcoded default and rewrites {@code config/caustica.toml} with
+     * the keys, defaults and comments a first launch writes. Settings the renderer reads every frame take
+     * effect at once; settings fixed at bring-up (traversal backend, OMM, worker threads, capacities) only
+     * after a restart. A {@code -Dcaustica.*} override still wins over the restored value on the next launch,
+     * because system properties are applied when a setting resolves its value.
+     */
+    public static synchronized void resetToDefaults() {
+        ensureRegistered();
+        for (RuntimeSetting<?> setting : SETTINGS) {
+            setting.restoreDefault();
+        }
+        try {
+            // Drop the existing entries first: a key no current setting describes (an option removed in an
+            // older version, or a typo) would otherwise survive a rewrite that only touches registered ones.
+            FILE.clear();
+            save();
+            LOGGER.info("Caustica settings reset to defaults; wrote {}", CONFIG_PATH);
+        } catch (RuntimeException e) {
+            // The in-memory settings are already back at their defaults; a failed write leaves the old file
+            // until the next save (leaving the Video Settings screen saves again), so this must not throw.
+            LOGGER.warn("Caustica settings reset to defaults, but writing {} failed: {}", CONFIG_PATH, e.toString());
+        }
     }
 
     /** Writes the default config file if it does not exist yet. */
@@ -95,7 +123,16 @@ public final class CausticaConfig {
                         + " minimum-interval-us controls frame limiting; 0 disables the limit.");
         FILE.setComment("lights",
                 " Controls direct lighting from glowing blocks such as torches, glowstone, and lava.\n"
-                        + " Set ris-candidates to 0 to disable it. stats, dump, and dump-radius are debugging options.");
+                        + " Set ris-candidates to 0 to disable it. temporal reuses one emitter sample per pixel\n"
+                        + " across frames instead of drawing every candidate each frame; bounce traces emitter\n"
+                        + " NEE at secondary bounces too (one extra shadow ray per vertex). stats, dump, and\n"
+                        + " dump-radius are debugging options.");
+        FILE.setComment("restir",
+                " ReSTIR PT: spatiotemporal resampling of indirect path samples. enabled switches the indirect\n"
+                        + " pass between reservoir reuse and the ordinary per-pixel path tracer. spatial-samples is\n"
+                        + " the neighbor count per pixel, spatial-radius-pixels is the disk radius,\n"
+                        + " confidence-cap bounds how many samples a reservoir may accumulate, and firefly-clamp\n"
+                        + " caps a pixel's indirect luminance in pre-exposed units.");
         FILE.setComment("tonemap",
                 " Controls the final image. gamma: 1 is neutral; lower values brighten midtones.");
         FILE.setComment("motion-blur",
@@ -125,6 +162,11 @@ public final class CausticaConfig {
                         + " exposes VK_KHR_ray_tracing_pipeline and falls back to ray queries elsewhere (Qualcomm\n"
                         + " Adreno and other devices without the pipeline extension); ray-query forces the inline\n"
                         + " backend on hardware that could run either. Applied at startup.");
+        FILE.setComment("frame-stats",
+                " Opt-in render profiling. enabled times the CPU side of every stage and logs hitches;\n"
+                        + " gpu reads timestamp queries back from the device and logs the executed GPU time per\n"
+                        + " stage, which is what identifies a GPU-bound pass. Both write rt-frame-stats/ under the\n"
+                        + " game directory and add one log line every couple of seconds; leave them off otherwise.");
     }
 
     private static Path resolveConfigPath() {
@@ -174,6 +216,12 @@ public final class CausticaConfig {
 
         void set(T value);
 
+        /**
+         * Restores the hardcoded default in memory, ignoring both the config file and any {@code -D} override
+         * for this run. The caller owns persisting it with {@link CausticaConfig#save()}.
+         */
+        void restoreDefault();
+
         void reloadFromSystemProperties();
 
         /** Writes this setting's current value into the given config at {@link #tomlPath()}. */
@@ -221,6 +269,11 @@ public final class CausticaConfig {
         @Override
         public void set(Boolean value) {
             this.value = value != null ? value : defaultValue;
+        }
+
+        @Override
+        public void restoreDefault() {
+            this.value = defaultValue;
         }
 
         @Override
@@ -286,6 +339,11 @@ public final class CausticaConfig {
         @Override
         public void set(Integer value) {
             this.value = sanitize.applyAsInt(value != null ? value : defaultValue);
+        }
+
+        @Override
+        public void restoreDefault() {
+            this.value = defaultValue;
         }
 
         @Override
@@ -382,6 +440,11 @@ public final class CausticaConfig {
         }
 
         @Override
+        public void restoreDefault() {
+            this.value = defaultValue;
+        }
+
+        @Override
         public void reloadFromSystemProperties() {
             String prop = System.getProperty(key);
             if (prop == null) {
@@ -463,6 +526,11 @@ public final class CausticaConfig {
         }
 
         @Override
+        public void restoreDefault() {
+            this.value = defaultValue;
+        }
+
+        @Override
         public void reloadFromSystemProperties() {
             set(System.getProperty(key, defaultValue));
         }
@@ -517,6 +585,11 @@ public final class CausticaConfig {
         @Override
         public void set(String value) {
             this.value = value;
+        }
+
+        @Override
+        public void restoreDefault() {
+            this.value = null;
         }
 
         @Override
@@ -589,16 +662,58 @@ public final class CausticaConfig {
 
         /** RIS block-emitter lights. {@code ris-candidates = 0} disables everything. */
         public static final class Lights {
+            // Capped at the shader's fixed candidate batch (RIS_MAX_CANDIDATES in lighting.slang); a larger
+            // value would be silently skipped there while still counting toward the reservoir's M.
             public static final IntSetting RIS_CANDIDATES =
-                    intAtLeast("caustica.rt.risCandidates", "lights.ris-candidates", 8, 0);
+                    clampedInt("caustica.rt.risCandidates", "lights.ris-candidates", 8, 0, 8);
             public static final FloatSetting MIN_FILL_RATIO =
                     finiteFloat("caustica.rt.lightMinFillRatio", "lights.min-fill-ratio", 0.25f);
             public static final BooleanSetting STATS = bool("caustica.rt.lightStats", "lights.stats", false);
             public static final BooleanSetting DUMP = bool("caustica.rt.lightDump", "lights.dump", false);
             public static final IntSetting DUMP_RADIUS =
                     intAtLeast("caustica.rt.lightDumpRadius", "lights.dump-radius", 12, 1);
+            /**
+             * Carry one emitter sample per pixel across frames and merge it with a single fresh candidate
+             * instead of re-drawing every candidate each frame. Emitter illumination accumulates temporally
+             * the same way the ReSTIR path's indirect estimate does (biased GRIS, no pairwise MIS); the
+             * per-frame cost drops from the configured candidate count to one candidate plus one load.
+             */
+            public static final BooleanSetting TEMPORAL = bool("caustica.rt.lights.temporal", "lights.temporal", true);
+            /**
+             * Trace emitter NEE at secondary bounces as well as at the visible surface. Each bounce vertex pays
+             * one more shadow ray for it; turning it off keeps direct emitter lighting and direct hits on
+             * emitters, and drops only the indirect bounce light emitters contribute.
+             */
+            public static final BooleanSetting BOUNCE = bool("caustica.rt.lights.bounce", "lights.bounce", true);
 
             private Lights() {
+            }
+        }
+
+        /**
+         * ReSTIR PT: reservoir-based spatiotemporal reuse of indirect path samples. When enabled, a
+         * path-sampling pass and a spatial-reuse pass extend the indirect pass, and the previous frame's
+         * reservoirs feed temporal reuse. These settings shape that reuse only.
+         */
+        public static final class Restir {
+            // Opt-in. Temporal-only (the default) costs 96 B history + 64 B primary + 4 B mask per render
+            // pixel; spatial samples > 0 additionally allocate a 96 B scratch array and enable the spatial
+            // pass. Enabling the option allocates the arrays on the next frame.
+            public static final BooleanSetting ENABLED = bool("caustica.rt.restir", "restir.enabled", false);
+            public static final BooleanSetting TEMPORAL = bool("caustica.rt.restirTemporal", "restir.temporal", true);
+            public static final IntSetting SPATIAL_SAMPLES =
+                    clampedInt("caustica.rt.restirSpatialSamples", "restir.spatial-samples", 0, 0, 8);
+            public static final IntSetting SPATIAL_RADIUS =
+                    clampedInt("caustica.rt.restirSpatialRadius", "restir.spatial-radius-pixels", 12, 1, 64);
+            public static final IntSetting CONFIDENCE_CAP =
+                    clampedInt("caustica.rt.restirConfidenceCap", "restir.confidence-cap", 8, 1, 64);
+            // Hue-preserving luminance ceiling for a pixel's indirect estimate, in pre-exposed radiance.
+            // Legitimate bright indirect stays below a few display whites; a leaked firefly from an
+            // emitter-adjacent path is far above that and would otherwise be smeared by the denoiser.
+            public static final FloatSetting FIREFLY_CLAMP =
+                    clampedFloat("caustica.rt.restirFireflyClamp", "restir.firefly-clamp", 2.0f, 0.0f, 1.0e6f);
+
+            private Restir() {
             }
         }
 
@@ -729,7 +844,7 @@ public final class CausticaConfig {
             // (1.5x), balanced (1.7x), performance (2.0x), ultra-performance (3.0x). This is purely the
             // render/display ratio; quality is the default because a path tracer trades resolution for
             // samples far better than it trades noise for a stretched image.
-            public static final List<Integer> QUALITY_STEPS = List.of(0, 1, 2, 3, 4);
+            public static final List<Integer> QUALITY_STEPS = List.of(0, 1, 2, 3, 4, 5);
             public static final IntSetting QUALITY =
                     intChoice("caustica.rt.reconstruction.quality", "reconstruction.quality", 1, QUALITY_STEPS);
 
@@ -965,7 +1080,15 @@ public final class CausticaConfig {
 
         /** Render-frame timing + hitch logging. See {@code RtFrameStats}. */
         public static final class FrameStats {
+            /** CPU time per recorded stage, per-frame CSV and hitch lines. */
             public static final BooleanSetting ENABLED = bool("caustica.rt.frameStats", "frame-stats.enabled", false);
+            /**
+             * Executed GPU time per stage, read back from timestamp queries. This is the half that identifies
+             * a GPU-bound pass; it is separate from {@link #ENABLED} so a frame-time report on a device that
+             * does not need profiling stays free of query traffic. See {@code RtGpuProfile}.
+             */
+            public static final BooleanSetting GPU =
+                    bool("caustica.rt.frameStats.gpu", "frame-stats.gpu", false);
 
             private FrameStats() {
             }

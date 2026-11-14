@@ -25,10 +25,12 @@ import segment;
 import water;
 import trace;
 import guides;
+import restir_common;
 
 public PathSegment tracePrimary(PathSegment seg,
                                 DevicePtr<PackedPathSegment> queue,
                                 uint splitRecord,
+                                uint recordIndex,
                                 out uint nextRecord) {
     float3 ro = seg.ro;
     float3 rd = seg.rd;
@@ -77,6 +79,28 @@ public PathSegment tracePrimary(PathSegment seg,
             float3 diffAlb = material == MATERIAL_PARTICLE
                     ? hitAlbedo : hitAlbedo * (1.0 - metal);
             if (bounce == 0) {
+                // Publish the visible primary surface once. The reservoir passes reuse this hit instead of
+                // re-tracing the camera ray; only an opaque, dry, non-delta direct hit is resamplable.
+                if (pc.restirPrimaryAddr != 0 && (worldPush.restirFlags & 4u) != 0u
+                        && material == MATERIAL_OPAQUE && !exactSpecular
+                        && (worldPush.flags & 1u) == 0u) {
+                    RestirPrimary record = {};
+                    record.pos = hitPos;
+                    record.packedNormal = packUnorm16x2(octEncode(n));
+                    record.packedView = packUnorm16x2(octEncode(-rd));
+                    record.flags = RESTIR_PRIMARY_VALID
+                            | (payloadEmitterInList() ? RESTIR_PRIMARY_EMITTER : 0u);
+                    record.packedAlbedo0 = packHalf2(hitAlbedo.xy);
+                    record.packedAlbedo1 = packHalf2(float2(hitAlbedo.z, 0.0));
+                    record.packedF00 = packHalf2(payload.f0.xy);
+                    record.packedF01 = packHalf2(float2(payload.f0.z, 0.0));
+                    record.packedRoughMetal = packHalf2(float2(rough, metal));
+                    record.packedSssEmission = packHalf2(float2(payloadSss(), payloadEmission()));
+                    float3 motion = float3(payload.motionPrev);
+                    record.packedMotion0 = packHalf2(motion.xy);
+                    record.packedMotion1 = packHalf2(float2(motion.z, 0.0));
+                    DevicePtr<RestirPrimary>(pc.restirPrimaryAddr)[recordIndex] = record;
+                }
                 gv_normal = n;
                 gv_hitCamRel = hitPos - worldPush.camOffset;
                 gv_motionUseRefracted = false;
@@ -243,9 +267,16 @@ public void primaryPass(uint2 dispatchIndex, uint2 dimensions) {
     seed = pcg(seed);
     PathSegment current = makePathSegment(origin, dir, float3(1.0, 1.0, 1.0),
             cameraMedium, 0.0, rayConeSpread, seed, 0, true);
+    // Clear this pixel's primary record first: only the eligible opaque branch publishes a valid one, so
+    // misses, dielectrics, particles, mirrors and submerged primaries stay invalid.
+    if (pc.restirPrimaryAddr != 0 && (worldPush.restirFlags & 4u) != 0u) {
+        RestirPrimary invalid = {};
+        invalid.flags = 0u;
+        DevicePtr<RestirPrimary>(pc.restirPrimaryAddr)[pixelIndex] = invalid;
+    }
     uint nextRecord;
     PathSegment terminal = tracePrimary(
-            current, queue, splitRecord, nextRecord);
+            current, queue, splitRecord, pixelIndex, nextRecord);
     queue[pixelIndex] = packPathSegment(terminal, nextRecord);
 
     writeGuides(pix, dir, jndc, size, rayConeSpread);

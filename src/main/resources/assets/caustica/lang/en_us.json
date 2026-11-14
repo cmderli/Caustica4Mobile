@@ -1,51 +1,39 @@
 {
 	"caustica.options.rt.header": "Ray Tracing",
-
 	"caustica.options.rt.exposureMode": "Exposure",
 	"caustica.options.rt.exposureMode.tooltip": "How the ray-traced image is mapped to display brightness. Auto adapts to scene luminance; Manual uses the exposure value directly.",
 	"caustica.options.rt.exposureMode.auto": "Auto",
 	"caustica.options.rt.exposureMode.manual": "Manual",
-
 	"caustica.options.rt.manualEv": "Exposure EV",
 	"caustica.options.rt.manualEv.tooltip": "Exposure compensation in stops. In Manual, this is the fixed exposure. In Auto, this biases the auto exposure brighter or darker.",
-
 	"caustica.options.rt.gamma": "Gamma",
 	"caustica.options.rt.gamma.tooltip": "Post-transform luminance gamma. Values below 1.00 brighten shadows and midtones while preserving black, white, and color ratios.",
-
 	"caustica.options.rt.spp": "Samples Per Pixel",
 	"caustica.options.rt.spp.tooltip": "Path-tracing samples taken per pixel each frame. Higher is cleaner but more demanding.",
-
 	"caustica.options.rt.maxBounces": "Path Bounces",
 	"caustica.options.rt.maxBounces.tooltip": "Maximum number of secondary path-tracing bounces after the primary hit. Higher captures more indirect light but costs more.",
-
+	"caustica.options.rt.restir": "ReSTIR PT",
+	"caustica.options.rt.restir.tooltip": "Reuse indirect paths across pixels and frames (ReSTIR PT). Sharper indirect lighting at low sample counts; applies to opaque primary hits.",
 	"caustica.options.rt.entities": "Ray-Traced Entities",
 	"caustica.options.rt.entities.tooltip": "Include entities and block entities in the ray-traced scene.",
-
 	"caustica.options.rt.particles": "Ray-Traced Particles",
 	"caustica.options.rt.particles.tooltip": "Draw particles as camera-ray billboards inside the traced scene.",
-
 	"caustica.options.rt.glow": "Entity Glow Outline",
 	"caustica.options.rt.glow.tooltip": "Draw the vanilla Glowing-effect outline (through walls) around glowing entities.",
-
 	"caustica.options.rt.waterWaves": "Animated Water",
 	"caustica.options.rt.waterWaves.tooltip": "Animate water-surface normals for moving wave highlights.",
-
 	"caustica.options.rt.motionBlur": "Motion Blur",
 	"caustica.options.rt.motionBlur.tooltip": "Blur the image along each pixel's real motion vectors over the shutter interval. Camera turns and moving objects streak the way a film camera's open shutter does; cost is one display-resolution pass.",
 	"caustica.options.rt.motionBlurShutter": "Shutter Angle",
 	"caustica.options.rt.motionBlurShutter.tooltip": "How much of the frame interval the virtual shutter stays open, in degrees: 180 is the film standard (half the frame), 360 keeps it open the whole time, 0 disables the streak.",
 	"caustica.options.rt.motionBlurSamples": "Motion Blur Samples",
 	"caustica.options.rt.motionBlurSamples.tooltip": "Taps averaged along the streak. More is smoother on fast motion; 8 is a good default.",
-
 	"caustica.options.rt.hdr": "HDR Output",
 	"caustica.options.rt.hdr.tooltip": "Recreate the swapchain for HDR (ST.2084/PQ) or native SDR output. Applied at the next frame boundary.",
-
 	"caustica.options.rt.hdrUiBrightness": "HDR UI Brightness",
 	"caustica.options.rt.hdrUiBrightness.tooltip": "Absolute brightness (in nits) assigned to SDR-authored UI on an HDR display. BT.2408 puts SDR graphics white at 203 nits; the ACES HDR output transform puts a white surface in the world near 107 nits at a 1000 nit peak.",
-
 	"caustica.options.rt.hdrPeak": "HDR Peak Brightness",
 	"caustica.options.rt.hdrPeak.tooltip": "Absolute brightness (in nits) highlights roll off toward, and the peak the HDR mastering metadata declares. Set to your display's peak HDR brightness.",
-
 	"caustica.options.rt.denoiser": "Denoiser",
 	"caustica.options.rt.denoiser.tooltip": "Which denoiser cleans up the path-traced image. Auto picks the best one this machine can run. DLSS Ray Reconstruction needs an NVIDIA RTX GPU, NRD needs its native library, and the built-in denoiser always works but is softer because it has no frame history. Off shows the raw traced image.",
 	"caustica.options.rt.denoiser.auto": "Auto",
@@ -53,7 +41,6 @@
 	"caustica.options.rt.denoiser.nrd": "NRD",
 	"caustica.options.rt.denoiser.builtin": "Built-in",
 	"caustica.options.rt.denoiser.off": "Off",
-
 	"caustica.options.rt.superResolutionMethod": "Super Resolution Method",
 	"caustica.options.rt.superResolutionMethod.tooltip": "Which upscaler brings the render-resolution image to your screen. Auto uses FSR when its runtime is installed and SGSR2 otherwise. Bilinear always works but is softer.",
 	"caustica.options.rt.superResolutionMethod.auto": "Auto",
@@ -68,7 +55,7 @@
 	"caustica.options.rt.superResolution.2": "Balanced",
 	"caustica.options.rt.superResolution.3": "Performance",
 	"caustica.options.rt.superResolution.4": "Ultra Performance",
-
+	"caustica.options.rt.superResolution.5": "Extreme Performance",
 	"caustica.options.rt.debugView": "Debug View",
 	"caustica.options.rt.debugView.tooltip": "Inspect ray-tracing buffers and exposure diagnostics after the normal frame has rendered.",
 	"caustica.options.rt.debugView.0": "Off",
@@ -80,5 +67,11 @@
 	"caustica.options.rt.debugView.6": "Specular",
 	"caustica.options.rt.debugView.7": "Specular Motion",
 	"caustica.options.rt.debugView.8": "Exposure False Color",
-	"caustica.options.rt.debugView.9": "Metering Weight"
+	"caustica.options.rt.debugView.9": "Metering Weight",
+	"caustica.options.rt.lightCandidates": "RIS Light Candidates",
+	"caustica.options.rt.lightCandidates.tooltip": "Emitter (block light) candidates sampled per shaded surface point. Every candidate is one shadow ray, so this is the largest ray-count knob in the path pass: lowering it cuts cost roughly linearly and makes direct light from glowing blocks noisier. 0 disables emitter sampling and leaves only each emitter's own visible glow.",
+	"caustica.options.rt.gpuProfiling": "Frame Profiling",
+	"caustica.options.rt.gpuProfiling.tooltip": "Log the executed GPU time of each frame stage (path trace, TLAS build, NRD, SGSR2, exposure, bloom, display) every couple of seconds, and write rt-frame-stats/gpu.csv. Use it to find which pass a low frame rate is spent on; leave it off otherwise.",
+	"caustica.options.rt.resetDefaults": "Reset Caustica Settings",
+	"caustica.options.rt.resetDefaults.tooltip": "Restore every Caustica setting to its default and rewrite config/caustica.toml. Most options apply immediately; settings fixed at startup (traversal backend, OMM, worker threads, capacities) take effect on the next launch."
 }

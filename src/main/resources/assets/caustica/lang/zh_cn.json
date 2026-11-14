@@ -1,51 +1,39 @@
 {
 	"caustica.options.rt.header": "光线追踪",
-
 	"caustica.options.rt.exposureMode": "曝光",
 	"caustica.options.rt.exposureMode.tooltip": "决定如何将光线追踪图像映射到显示亮度。自动会适应场景亮度；手动会直接使用曝光值。",
 	"caustica.options.rt.exposureMode.auto": "自动",
 	"caustica.options.rt.exposureMode.manual": "手动",
-
 	"caustica.options.rt.manualEv": "曝光 EV",
 	"caustica.options.rt.manualEv.tooltip": "以档位为单位的曝光补偿。手动模式下这是固定曝光；自动模式下会让自动曝光更亮或更暗。",
-
 	"caustica.options.rt.gamma": "伽马",
 	"caustica.options.rt.gamma.tooltip": "变换后的亮度伽马。低于 1.00 的值会提亮阴影和中间调，同时保持黑场、白场和颜色比例不变。",
-
 	"caustica.options.rt.spp": "每像素采样数",
 	"caustica.options.rt.spp.tooltip": "每帧对每个像素进行的路径追踪采样数。数值越高画面越干净，但负载也越高。",
-
 	"caustica.options.rt.maxBounces": "路径反弹",
 	"caustica.options.rt.maxBounces.tooltip": "主命中之后的二级路径追踪反弹最大次数。数值越高能捕捉更多间接光，但成本也越高。",
-
+	"caustica.options.rt.restir": "ReSTIR PT",
+	"caustica.options.rt.restir.tooltip": "在像素与帧之间重用间接光路径（ReSTIR PT）。低采样数下间接光更锐利；仅适用于不透明主命中。",
 	"caustica.options.rt.entities": "光追实体",
 	"caustica.options.rt.entities.tooltip": "将实体和方块实体加入光追场景。",
-
 	"caustica.options.rt.particles": "光追粒子",
 	"caustica.options.rt.particles.tooltip": "在追踪场景中，将粒子绘制为面向相机射线的公告板。",
-
 	"caustica.options.rt.glow": "实体发光轮廓",
 	"caustica.options.rt.glow.tooltip": "为发光实体绘制原版发光效果轮廓（可穿墙显示）。",
-
 	"caustica.options.rt.waterWaves": "动态水面",
 	"caustica.options.rt.waterWaves.tooltip": "对水面法线进行动画处理，以显示移动波浪高光。",
-
 	"caustica.options.rt.motionBlur": "动态模糊",
 	"caustica.options.rt.motionBlur.tooltip": "沿每个像素的真实运动矢量，在快门时间内对画面做积分模糊。相机转动和移动物体会像胶片快门一样拖影；开销为一个显示分辨率的计算通道。",
 	"caustica.options.rt.motionBlurShutter": "快门角度",
 	"caustica.options.rt.motionBlurShutter.tooltip": "虚拟快门在一个帧间隔内保持开启的比例，单位为度：180 度是胶片标准（半个帧间隔），360 度全程开启，0 度关闭拖影。",
 	"caustica.options.rt.motionBlurSamples": "动态模糊采样数",
 	"caustica.options.rt.motionBlurSamples.tooltip": "沿拖影方向平均的采样点数。数值越高，快速运动越平滑；8 是合适的默认值。",
-
 	"caustica.options.rt.hdr": "HDR 输出",
 	"caustica.options.rt.hdr.tooltip": "为 HDR (ST.2084/PQ) 或原生 SDR 输出重建交换链。在下一个帧边界生效。",
-
 	"caustica.options.rt.hdrUiBrightness": "HDR 界面亮度",
 	"caustica.options.rt.hdrUiBrightness.tooltip": "在 HDR 显示器上为 SDR 制作的界面分配的绝对亮度（nits）。BT.2408 将 SDR 图形白定在 203 nits；在 1000 nits 峰值下，ACES 的 HDR 输出变换会把场景中的白色表面放在约 107 nits。",
-
 	"caustica.options.rt.hdrPeak": "HDR 峰值亮度",
 	"caustica.options.rt.hdrPeak.tooltip": "高光回落目标的绝对亮度（nits）。请设为显示器的 HDR 峰值亮度。",
-
 	"caustica.options.rt.denoiser": "降噪器",
 	"caustica.options.rt.denoiser.tooltip": "用哪种降噪器清理路径追踪图像。自动会挑选本机可用的最佳方案。DLSS 光线重构需要 NVIDIA RTX 显卡；NRD 需要它的原生库；内置降噪器始终可用，但没有帧历史，因此画面更柔和。关闭则显示未降噪的原始追踪图像。",
 	"caustica.options.rt.denoiser.auto": "自动",
@@ -53,7 +41,6 @@
 	"caustica.options.rt.denoiser.nrd": "NRD",
 	"caustica.options.rt.denoiser.builtin": "内置",
 	"caustica.options.rt.denoiser.off": "关闭",
-
 	"caustica.options.rt.superResolutionMethod": "超分辨率方式",
 	"caustica.options.rt.superResolutionMethod.tooltip": "用哪种超分方式把渲染分辨率的图像送到屏幕。自动会在安装了 FSR 运行时时使用 FSR，否则使用 SGSR2。双线性始终可用，但画面更模糊。",
 	"caustica.options.rt.superResolutionMethod.auto": "自动",
@@ -68,7 +55,7 @@
 	"caustica.options.rt.superResolution.2": "平衡",
 	"caustica.options.rt.superResolution.3": "性能",
 	"caustica.options.rt.superResolution.4": "极致性能",
-
+	"caustica.options.rt.superResolution.5": "极限性能",
 	"caustica.options.rt.debugView": "调试视图",
 	"caustica.options.rt.debugView.tooltip": "显示光线追踪的中间缓冲区，而不是最终图像。",
 	"caustica.options.rt.debugView.0": "关闭",
@@ -80,5 +67,11 @@
 	"caustica.options.rt.debugView.6": "高光",
 	"caustica.options.rt.debugView.7": "高光运动",
 	"caustica.options.rt.debugView.8": "曝光伪色",
-	"caustica.options.rt.debugView.9": "测光权重"
+	"caustica.options.rt.debugView.9": "测光权重",
+	"caustica.options.rt.lightCandidates": "RIS 光源候选数",
+	"caustica.options.rt.lightCandidates.tooltip": "每个着色表面点采样的方块光源候选数。每个候选是一条阴影光线，因此这是控制光线数量最有效的开关：调低可近乎线性地降低开销，代价是发光方块产生的直接光照更噪。设为 0 时关闭自发光采样，只保留发光体本身可见的亮度。",
+	"caustica.options.rt.gpuProfiling": "帧时间分析",
+	"caustica.options.rt.gpuProfiling.tooltip": "每隔几秒记录各阶段的真实 GPU 耗时（路径追踪、TLAS、NRD、SGSR2、曝光、泛光、显示），并写入 rt-frame-stats/gpu.csv。用于确认低帧率花在哪一段；平时请关闭。",
+	"caustica.options.rt.resetDefaults": "恢复 Caustica 默认设置",
+	"caustica.options.rt.resetDefaults.tooltip": "将所有 Caustica 设置恢复为默认值，并重新生成 config/caustica.toml。多数选项立即生效；启动时固定读取的设置（遍历后端、OMM、工作线程数、各种容量）需要下次启动才生效。"
 }

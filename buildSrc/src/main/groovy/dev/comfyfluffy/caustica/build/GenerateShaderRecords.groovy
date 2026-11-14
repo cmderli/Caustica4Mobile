@@ -302,6 +302,32 @@ abstract class GenerateShaderRecords extends DefaultTask {
         Map exposureStateType = exposureStateProbeArray.type.elementType as Map
         int exposureStateByteSize = exposureStateProbeArray.type.uniformStride as int
 
+        def restirParameter = reflection.parameters.find { it.name == "restirReservoirLayoutProbe" }
+        def restirProbeArray = restirParameter?.type?.resultType?.fields?.find { it.name == "values" }
+        if (restirProbeArray?.type?.kind != "array" || restirProbeArray.type.elementType?.name != "RestirReservoir") {
+            throw new GradleException("unexpected RestirReservoir reflection probe shape")
+        }
+        Map restirReservoirType = restirProbeArray.type.elementType as Map
+        int restirReservoirByteSize = restirProbeArray.type.uniformStride as int
+
+        def restirPrimaryParameter = reflection.parameters.find { it.name == "restirPrimaryLayoutProbe" }
+        def restirPrimaryProbeArray = restirPrimaryParameter?.type?.resultType?.fields?.find { it.name == "values" }
+        if (restirPrimaryProbeArray?.type?.kind != "array"
+                || restirPrimaryProbeArray.type.elementType?.name != "RestirPrimary") {
+            throw new GradleException("unexpected RestirPrimary reflection probe shape")
+        }
+        Map restirPrimaryType = restirPrimaryProbeArray.type.elementType as Map
+        int restirPrimaryByteSize = restirPrimaryProbeArray.type.uniformStride as int
+
+        def emitterHistoryParameter = reflection.parameters.find { it.name == "emitterHistoryLayoutProbe" }
+        def emitterHistoryProbeArray = emitterHistoryParameter?.type?.resultType?.fields?.find { it.name == "values" }
+        if (emitterHistoryProbeArray?.type?.kind != "array"
+                || emitterHistoryProbeArray.type.elementType?.name != "EmitterHistory") {
+            throw new GradleException("unexpected EmitterHistory reflection probe shape")
+        }
+        Map emitterHistoryType = emitterHistoryProbeArray.type.elementType as Map
+        int emitterHistoryByteSize = emitterHistoryProbeArray.type.uniformStride as int
+
         def generatedRoot = outDir.get().asFile
         if (generatedRoot.exists() && !generatedRoot.deleteDir()) {
             throw new GradleException("failed to clear generated shader record sources under ${generatedRoot}")
@@ -314,6 +340,12 @@ abstract class GenerateShaderRecords extends DefaultTask {
                 generateJava(materialHeaderType, materialHeaderByteSize, "MaterialHeaderData"), "UTF-8")
         new File(packageDir, "ExposureStateData.java").setText(
                 generateJava(exposureStateType, exposureStateByteSize, "ExposureStateData", true), "UTF-8")
+        new File(packageDir, "RestirReservoirData.java").setText(
+                generateJava(restirReservoirType, restirReservoirByteSize, "RestirReservoirData"), "UTF-8")
+        new File(packageDir, "RestirPrimaryData.java").setText(
+                generateJava(restirPrimaryType, restirPrimaryByteSize, "RestirPrimaryData"), "UTF-8")
+        new File(packageDir, "EmitterHistoryData.java").setText(
+                generateJava(emitterHistoryType, emitterHistoryByteSize, "EmitterHistoryData"), "UTF-8")
 
         PUSH_CONSTANT_PROBES.each { probeName, structName, className ->
             Map type = extractPushConstantType(reflection, probeName, structName)

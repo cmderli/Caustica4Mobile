@@ -11,6 +11,9 @@ import dev.comfyfluffy.caustica.CausticaConfig;
 import dev.comfyfluffy.caustica.CausticaMod;
 import dev.comfyfluffy.caustica.client.CausticaJitter;
 import dev.comfyfluffy.caustica.mixin.CommandEncoderAccessor;
+import dev.comfyfluffy.caustica.rt.gen.EmitterHistoryData;
+import dev.comfyfluffy.caustica.rt.gen.RestirPrimaryData;
+import dev.comfyfluffy.caustica.rt.gen.RestirReservoirData;
 import dev.comfyfluffy.caustica.rt.gen.WorldPushConstantsData;
 import dev.comfyfluffy.caustica.rt.gen.WorldPushData;
 import dev.comfyfluffy.caustica.rt.gen.WorldPushData.BreakEntry;
@@ -123,6 +126,7 @@ public final class RtComposite {
     }
 
     private static final int WATER_ANCHOR_MASK = 4095;
+    private static final long FRAME_RATE_LOG_INTERVAL_NANOS = 5_000_000_000L;
 
     // Relative view-distance difference at which a motion blur tap stops contributing. Wide enough that a
     // slanted surface seen through a camera move stays one surface (its streak would otherwise be cut off),
@@ -200,6 +204,29 @@ public final class RtComposite {
     // Packed primary -> indirect continuations. Pass A is fixed at one sample and owns two records per
     // render pixel (base + optional transmission); Pass B resamples them at the configured SPP.
     private RtBuffer continuationQueue;
+    // One emitter sample per render pixel, carried across frames by the ordinary indirect pass. Cleared
+    // whenever a sample could describe geometry or lights that no longer exist: a new material epoch (the
+    // light buffer is rebuilt from it) and any change in the published light count.
+    private RtBuffer emitterHistory;
+    private boolean emitterHistoryPendingClear = true;
+    private int emitterHistoryLightCount = -1;
+    // ReSTIR PT reservoirs, one entry per render pixel. The history array is the previous frame's final
+    // reservoir and is also what this frame's spatial pass overwrites; the scratch array holds this
+    // frame's path-generation + temporal-reuse result between the two passes. Their byte stride comes from
+    // Slang reflection so the shader struct and this allocation cannot drift apart.
+    private RtBuffer restirHistory;
+    private RtBuffer restirScratch;
+    // Visible primary surface records, written once by the primary pass. Both reservoir passes read them
+    // instead of tracing the camera ray again; the primary pass already paid for that hit.
+    private RtBuffer restirPrimary;
+    // Per-pixel uint mask: nonzero when the temporal pass produced a valid reservoir. The indirect fallback
+    // reads 4 B instead of a 96 B reservoir just to decide whether it must trace the pixel.
+    private RtBuffer restirMask;
+    // Clearing all three arrays is recorded into the next frame's command buffer; a cleared history is
+    // invalid, so the first frame after a reset runs without temporal reuse.
+    private boolean restirResetPending = true;
+    private boolean restirHistoryValid;
+    private boolean restirEnabledLastFrame;
     private RtImage displayImage;
     // Bloom pyramid, finest first: level 0 is half display resolution and each level halves again. The
     // display mapper reads level 0, which the upsample sweep leaves holding the sum of every band.
@@ -298,6 +325,21 @@ public final class RtComposite {
     private long atlasSampler;
     private boolean failed;
     private boolean loggedActive;
+    // Effective-render settings the last "RT effective settings" line described. Compared field by field so
+    // the summary is logged once per distinct configuration rather than once per frame, and so a log from a
+    // performance report always states the configuration that produced it.
+    private boolean settingsLogged;
+    private int loggedSpp = -1;
+    private int loggedBounces = -1;
+    private int loggedQuality = -1;
+    private String loggedDenoiser;
+    private String loggedUpscaler;
+    private int loggedToggles;
+    // Wall-clock frame-rate report. Counted in beginFrame(), which runs on every render frame regardless of
+    // whether RT composes, so a report taken with RT switched off still states what the base renderer ran at.
+    private long frameRateWindowStartNanos;
+    private int frameRateFrames;
+    private long lastCompositeNanos;
 
     // Camera captured each frame from GameRenderer (unjittered level projection + camera rotation + pos).
     private final Matrix4f frameProjection = new Matrix4f();
@@ -555,7 +597,53 @@ public final class RtComposite {
             throw new IllegalStateException("Previous RT graphics use was never completed");
         }
         RtFrameStats.FRAME.beginIfInactive();
+        // Completed profiling slots are read here, on the same thread that records them, so the readback
+        // never waits for the GPU and never races a frame still in flight.
+        RtContext profileContext = RtContext.currentOrNull();
+        if (profileContext != null) {
+            RtGpuProfile.INSTANCE.collect(profileContext);
+        }
+        logFrameRate();
         hdrWrittenThisFrame = false;
+    }
+
+    /**
+     * Reports the wall-clock frame rate every few seconds while either frame-stats option is on. It counts
+     * render frames rather than RT composites, so the same line works with the RT path switched off and says
+     * whether RT actually produced the frames (a menu, a failed composite or {@code enabled = false} all show
+     * as {@code rtComposite=off}).
+     */
+    private void logFrameRate() {
+        if (!CausticaConfig.Rt.FrameStats.ENABLED.value() && !CausticaConfig.Rt.FrameStats.GPU.value()) {
+            frameRateWindowStartNanos = 0L;
+            frameRateFrames = 0;
+            return;
+        }
+        long now = System.nanoTime();
+        if (frameRateWindowStartNanos == 0L) {
+            frameRateWindowStartNanos = now;
+            frameRateFrames = 0;
+            return;
+        }
+        frameRateFrames++;
+        long elapsed = now - frameRateWindowStartNanos;
+        if (elapsed < FRAME_RATE_LOG_INTERVAL_NANOS) {
+            return;
+        }
+        double seconds = elapsed / 1.0e9;
+        boolean rtComposite = now - lastCompositeNanos < FRAME_RATE_LOG_INTERVAL_NANOS;
+        CausticaMod.LOGGER.info(
+                "Frame rate: {} fps ({} frames / {} ms), rtEnabled={}, rtComposite={}, render={}, display={}, "
+                        + "denoiser={}->{}, upscaler={}->{}",
+                String.format(java.util.Locale.ROOT, "%.2f", frameRateFrames / seconds),
+                frameRateFrames, elapsed / 1_000_000L,
+                CausticaConfig.Rt.ENABLED.value(), rtComposite,
+                renderW > 0 ? renderW + "x" + renderH : "-",
+                displayW > 0 ? displayW + "x" + displayH : "-",
+                CausticaConfig.Rt.Reconstruction.DENOISER.get(), RtRecon.INSTANCE.denoiser(),
+                CausticaConfig.Rt.Reconstruction.UPSCALER.get(), RtRecon.INSTANCE.upscaler());
+        frameRateWindowStartNanos = now;
+        frameRateFrames = 0;
     }
 
     /** This frame's completion token, valid until {@link #finishGraphicsUse()} signals it. */
@@ -707,11 +795,17 @@ public final class RtComposite {
             RtPipeline active = ensureWorld(ctx);
             if (materialEpochTraceGate) {
                 materialEpochTraceGate = false;
+                // A new material epoch invalidates the surface parameters a reservoir was shaded with.
+                restirHistoryValid = false;
+                restirEnabledLastFrame = false;
+                emitterHistoryPendingClear = true;
                 return false;
             }
             refreshMaterialBindingsIfNeeded(ctx);
+            logEffectiveSettings();
             updateMotion();
             recordFrame(ctx, active, nativeColor);
+            lastCompositeNanos = System.nanoTime();
             if (!loggedActive) {
                 loggedActive = true;
                 CausticaMod.LOGGER.info("RT composite active (terrain): {}x{}, RT output replaces the world target", width, height);
@@ -723,6 +817,60 @@ public final class RtComposite {
             CausticaMod.LOGGER.error("RT composite failed; reverting to vanilla path", t);
             return false;
         }
+    }
+
+    /**
+     * Log the configuration this frame actually renders with — resolved reconstruction backends and render
+     * size included — once per distinct set of values. The configured strings and the effective backends can
+     * disagree (auto resolves by capability), and a performance report is useless without both.
+     */
+    private void logEffectiveSettings() {
+        int spp = spp();
+        int bounces = maxBounces();
+        int quality = CausticaConfig.Rt.Reconstruction.QUALITY.value();
+        String denoiser = CausticaConfig.Rt.Reconstruction.DENOISER.get();
+        String upscaler = CausticaConfig.Rt.Reconstruction.UPSCALER.get();
+        int toggles = (CausticaConfig.Rt.Restir.ENABLED.value() ? 1 : 0)
+                | (CausticaConfig.Rt.Restir.TEMPORAL.value() ? 2 : 0)
+                | (CausticaConfig.Rt.Restir.SPATIAL_SAMPLES.value() << 2)
+                | (CausticaConfig.Rt.MotionBlur.active() ? 1 << 8 : 0)
+                | (CausticaConfig.Rt.Entities.ENABLED.value() ? 1 << 9 : 0)
+                | (CausticaConfig.Rt.Entities.PARTICLES_ENABLED.value() ? 1 << 10 : 0)
+                | (waterWaves() ? 1 << 11 : 0)
+                | (CausticaConfig.Rt.Lights.RIS_CANDIDATES.value() << 12)
+                | (CausticaConfig.Rt.Lights.TEMPORAL.value() ? 1 << 20 : 0);
+        if (settingsLogged && spp == loggedSpp && bounces == loggedBounces && quality == loggedQuality
+                && toggles == loggedToggles
+                && denoiser.equals(loggedDenoiser) && upscaler.equals(loggedUpscaler)) {
+            return;
+        }
+        settingsLogged = true;
+        loggedSpp = spp;
+        loggedBounces = bounces;
+        loggedQuality = quality;
+        loggedToggles = toggles;
+        loggedDenoiser = denoiser;
+        loggedUpscaler = upscaler;
+        CausticaMod.LOGGER.info(
+                "RT effective settings: spp={} bounces={} quality={} render={}x{} display={}x{} "
+                        + "denoiser={}->{} upscaler={}->{} restir={}{} temporal={} spatial-samples={} "
+                        + "motion-blur={} entities={} particles={} water-waves={} ris-candidates={} lights={} "
+                        + "lights-temporal={}",
+                spp, bounces, quality, renderW, renderH, displayW, displayH,
+                denoiser, RtRecon.INSTANCE.denoiser(), upscaler, RtRecon.INSTANCE.upscaler(),
+                CausticaConfig.Rt.Restir.ENABLED.value() ? "on" : "off",
+                CausticaConfig.Rt.Restir.ENABLED.value() ? "" : " (passes skipped)",
+                CausticaConfig.Rt.Restir.TEMPORAL.value(),
+                CausticaConfig.Rt.Restir.SPATIAL_SAMPLES.value(),
+                CausticaConfig.Rt.MotionBlur.active() ? "on" : "off",
+                CausticaConfig.Rt.Entities.ENABLED.value(),
+                CausticaConfig.Rt.Entities.PARTICLES_ENABLED.value(),
+                waterWaves(),
+                CausticaConfig.Rt.Lights.RIS_CANDIDATES.value(),
+                // Emitter count decides whether RIS runs at all (risOn also needs risCandidates > 0), so a
+                // ray-count comparison between two logs is meaningless without it.
+                RtTerrain.currentOrNull() != null ? RtTerrain.currentOrNull().lightCount() : -1,
+                CausticaConfig.Rt.Lights.TEMPORAL.value());
     }
 
     /**
@@ -764,14 +912,35 @@ public final class RtComposite {
             // Both backends bind the same descriptor layout and share every shader module below their entry
             // points; only the entry points differ — SBT-dispatched raygen stages, or compute shaders that
             // own the inline traversal. The ray-query backend needs no hit/miss module names, because those
-            // bodies are plain functions inside its compute shaders.
+            // bodies are plain functions inside its compute shaders. Entry indices are the order below:
+            // 0 primary/guide, 1 indirect, 2 ReSTIR temporal, 3 ReSTIR spatial. The ReSTIR entries are
+            // omitted while the feature is off. Temporal-only mode also omits the spatial entry, so its
+            // shader is never compiled or loaded on devices that only run the mobile fast path.
+            boolean restirEnabled = CausticaConfig.Rt.Restir.ENABLED.value();
+            boolean restirSpatial = restirEnabled && CausticaConfig.Rt.Restir.SPATIAL_SAMPLES.value() > 0;
+            String[] worldEntryPoints;
+            if (!restirEnabled) {
+                worldEntryPoints = new String[]{primaryPassShader, mainPassShader};
+            } else if (restirSpatial) {
+                worldEntryPoints = new String[]{primaryPassShader, mainPassShader,
+                        RtDeviceBringup.worldRestirTemporalShader(),
+                        RtDeviceBringup.worldRestirSpatialShader()};
+            } else {
+                worldEntryPoints = new String[]{primaryPassShader, mainPassShader,
+                        RtDeviceBringup.worldRestirTemporalShader()};
+            }
             worldPipeline = RtDeviceBringup.worldUsesRayQuery()
-                    ? RtPipeline.createRayQuery(ctx, new String[]{primaryPassShader, mainPassShader},
+                    ? RtPipeline.createRayQuery(ctx, worldEntryPoints,
                             WorldPushConstantsData.BYTE_SIZE, bindlessTextureCapacity)
-                    : RtPipeline.create(ctx, new String[]{primaryPassShader, mainPassShader},
+                    : RtPipeline.create(ctx, worldEntryPoints,
                             new String[]{"sky.rmiss.spv", "guide.rmiss.spv"},
                             "closest_hit.rchit.spv", "any_hit.rahit.spv",
                             WorldPushConstantsData.BYTE_SIZE, bindlessTextureCapacity);
+            if (worldPipeline.hasRestirEntryPoints()) {
+                CausticaMod.LOGGER.info("RT world pipeline: ReSTIR PT entry points enabled ({}, {})",
+                        RtDeviceBringup.worldUsesRayQuery() ? "ray query" : "ray-tracing pipeline",
+                        restirSpatial ? "spatial reuse" : "temporal-only");
+            }
             // Per-frame world data lives in this BDA ring; the pipeline pushes its address and hot fields.
             if (pushRing == null) {
                 pushRing = new PushSlot[PUSH_RING];
@@ -794,6 +963,23 @@ public final class RtComposite {
 
     private void refreshPipelineShapeIfNeeded(RtContext ctx) {
         if (worldPipeline == null || reloadRebindRequested) {
+            return;
+        }
+        // The world pipeline has 2 entries normally, 3 in ReSTIR temporal-only mode, and 4 with spatial
+        // reuse. Rebuild on any shape transition so the driver does not keep unused shader modules loaded.
+        int desiredEntryPoints = !CausticaConfig.Rt.Restir.ENABLED.value() ? 2
+                : CausticaConfig.Rt.Restir.SPATIAL_SAMPLES.value() > 0 ? 4 : 3;
+        if (worldPipeline.entryPointCount() != desiredEntryPoints) {
+            ctx.waitIdle();
+            worldPipeline.destroy();
+            worldPipeline = null;
+            bindlessTextureCapacity = 0;
+            materialBindingsReady = false;
+            if (!CausticaConfig.Rt.Restir.ENABLED.value()) {
+                // The feature just turned off; release its arrays instead of leaving them resident until
+                // the next resize. ensureOutput skipped them this frame because they are not requested.
+                releaseRestirStorage();
+            }
             return;
         }
         int desiredBindlessCapacity = RtEntityTextures.maxTextures();
@@ -883,6 +1069,11 @@ public final class RtComposite {
         reloadRebindRequested = true;
         materialBindingsReady = false;
         setCelestialUvAtlas(0L);
+        // Material identity and geometry change across the reload, so no previous-frame path sample can
+        // be shifted into the new epoch.
+        restirResetPending = true;
+        restirHistoryValid = false;
+        restirEnabledLastFrame = false;
         RtEntities.INSTANCE.onResourceReload();
         RtContext ctx = RtContext.currentOrNull();
         if (ctx != null) {
@@ -955,7 +1146,30 @@ public final class RtComposite {
         // being inspected. In particular, toggling it must not rebuild at native resolution or disable
         // the reconstruction path whose render-resolution guide inputs the debug pass visualizes.
         int reconSizeKey = RtRecon.INSTANCE.renderSizeKey();
+        // The reservoir arrays are opt-in: enabling ReSTIR after startup forces this rebuild path once,
+        // which allocates them at the new render resolution.
+        boolean wantsRestir = CausticaConfig.Rt.Restir.ENABLED.value();
+        boolean wantsSpatial = wantsRestir && CausticaConfig.Rt.Restir.SPATIAL_SAMPLES.value() > 0;
+        if (!wantsRestir && hasRestirStorage()) {
+            // The pipeline can already be the two-entry shape when the option is turned off (for example
+            // after a world reload), so the shape-transition cleanup is not guaranteed to run. Release the
+            // arrays here instead of leaving several hundred MiB resident until the next resize.
+            ctx.waitIdle();
+            releaseRestirStorage();
+        }
+        if (wantsRestir && !wantsSpatial && restirScratch != null) {
+            // Spatial reuse is off: temporal-only mode shades in the temporal pass and never reads scratch.
+            ctx.waitIdle();
+            restirScratch.destroy();
+            restirScratch = null;
+            restirResetPending = true;
+        }
+        boolean restirReady = restirHistory != null && restirPrimary != null && restirMask != null
+                && (!wantsSpatial || restirScratch != null);
+        boolean wantsEmitterHistory = CausticaConfig.Rt.Lights.TEMPORAL.value();
+        boolean emitterHistoryReady = !wantsEmitterHistory || emitterHistory != null;
         if (output != null && continuationQueue != null
+                && (!wantsRestir || restirReady) && emitterHistoryReady
                 && displayImage != null && hdrDisplayImage != null && rrOutput != null
                 && blurredScene != null && bloomLevels.length > 0 && exposure.ready()
                 && displayW == width && displayH == height
@@ -981,6 +1195,26 @@ public final class RtComposite {
         if (continuationQueue != null) {
             continuationQueue.destroy();
             continuationQueue = null;
+        }
+        if (emitterHistory != null) {
+            emitterHistory.destroy();
+            emitterHistory = null;
+        }
+        if (restirHistory != null) {
+            restirHistory.destroy();
+            restirHistory = null;
+        }
+        if (restirScratch != null) {
+            restirScratch.destroy();
+            restirScratch = null;
+        }
+        if (restirPrimary != null) {
+            restirPrimary.destroy();
+            restirPrimary = null;
+        }
+        if (restirMask != null) {
+            restirMask.destroy();
+            restirMask = null;
         }
         destroyGuideImages();
 
@@ -1014,6 +1248,47 @@ public final class RtComposite {
         continuationQueue = ctx.createBuffer(continuationBytes,
                 VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false,
                 "path continuation queue " + renderW + "x" + renderH + "x2");
+        // Emitter temporal reuse storage, sized from Slang reflection. One 64 B record per render pixel;
+        // the indirect pass reads its own slot at the primary hit and writes the survivor back for the next
+        // frame, so no ping-pong copy is needed.
+        if (CausticaConfig.Rt.Lights.TEMPORAL.value()) {
+            long historyBytes = Math.multiplyExact(pixelRecords, (long) EmitterHistoryData.BYTE_SIZE);
+            emitterHistory = ctx.createBuffer(historyBytes,
+                    VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT, false,
+                    "emitter history " + renderW + "x" + renderH);
+            emitterHistoryPendingClear = true;
+            emitterHistoryLightCount = -1;
+            CausticaMod.LOGGER.info("Emitter temporal reuse storage: {}x{} ({} B/px, {} MiB)",
+                    renderW, renderH, EmitterHistoryData.BYTE_SIZE,
+                    String.format(java.util.Locale.ROOT, "%.1f", historyBytes / (1024.0 * 1024.0)));
+        }
+        // ReSTIR storage is sized from Slang reflection (RestirReservoirData.BYTE_SIZE and
+        // RestirPrimaryData.BYTE_SIZE). The mask is one uint per pixel. Scratch is only allocated for
+        // spatial reuse; temporal-only mode shades directly in the temporal pass.
+        if (wantsRestir) {
+            long restirBytes = Math.multiplyExact(pixelRecords, (long) RestirReservoirData.BYTE_SIZE);
+            int restirUsage = VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+            restirHistory = ctx.createBuffer(restirBytes, restirUsage, false,
+                    "ReSTIR PT reservoir history " + renderW + "x" + renderH);
+            if (wantsSpatial) {
+                restirScratch = ctx.createBuffer(restirBytes, restirUsage, false,
+                        "ReSTIR PT reservoir scratch " + renderW + "x" + renderH);
+            }
+            long primaryBytes = Math.multiplyExact(pixelRecords, (long) RestirPrimaryData.BYTE_SIZE);
+            restirPrimary = ctx.createBuffer(primaryBytes, restirUsage, false,
+                    "ReSTIR PT primary records " + renderW + "x" + renderH);
+            long maskBytes = Math.multiplyExact(pixelRecords, 4L);
+            restirMask = ctx.createBuffer(maskBytes, restirUsage, false,
+                    "ReSTIR PT valid mask " + renderW + "x" + renderH);
+            long totalBytes = restirBytes * (wantsSpatial ? 2L : 1L) + primaryBytes + maskBytes;
+            CausticaMod.LOGGER.info("ReSTIR PT storage: {}x{} (reservoir {} B, scratch {}, primary {} B, mask 4 B, {} MiB)",
+                    renderW, renderH, RestirReservoirData.BYTE_SIZE, wantsSpatial ? "on" : "off",
+                    RestirPrimaryData.BYTE_SIZE,
+                    String.format(java.util.Locale.ROOT, "%.1f", totalBytes / (1024.0 * 1024.0)));
+            restirResetPending = true;
+            restirHistoryValid = false;
+            restirEnabledLastFrame = false;
+        }
         displayImage = ctx.createStorageImage(width, height, VK10.VK_FORMAT_R8G8B8A8_UNORM, "RT display image " + width + "x" + height);
         // PQ-encoded ([0,1], ST.2084) HDR display image, written in parallel by display.comp when HDR mode is active.
         hdrDisplayImage = ctx.createStorageImage(width, height, VK10.VK_FORMAT_R16G16B16A16_SFLOAT, "RT HDR display image " + width + "x" + height);
@@ -1112,9 +1387,36 @@ public final class RtComposite {
         RtEntities.FrameEntities frameEntities = null;
         VkCommandBuffer cmd = encoder.allocateAndBeginTransientCommandBuffer();
         RtDebugLabels.name(ctx, VK10.VK_OBJECT_TYPE_COMMAND_BUFFER, cmd.address(), "composite command buffer");
+        RtGpuProfile.INSTANCE.beginFrame(cmd, graphicsUse);
+        RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.FRAME);
         int debugView = debugView();
         RtTerrain terrain = RtTerrain.currentOrNull();
         try (MemoryStack stack = MemoryStack.stackPush(); RtDebugLabels.Scope frameLabel = RtDebugLabels.scope(ctx, cmd, "composite frame")) {
+            // ReSTIR PT is active only when requested and its arrays and entry points exist. A pending
+            // reset clears them before any pass reads them; a cleared history means this frame runs
+            // without temporal reuse and the spatial pass (or temporal-only shading) repopulates it.
+            boolean restirSpatial = CausticaConfig.Rt.Restir.ENABLED.value()
+                    && CausticaConfig.Rt.Restir.SPATIAL_SAMPLES.value() > 0;
+            boolean restirEnabled = CausticaConfig.Rt.Restir.ENABLED.value()
+                    && restirHistory != null && restirPrimary != null && restirMask != null
+                    && (!restirSpatial || restirScratch != null)
+                    && active.hasRestirEntryPoints()
+                    && (!restirSpatial || active.hasSpatialReuseEntryPoint());
+            if (restirResetPending && restirHistory != null && restirPrimary != null && restirMask != null) {
+                VK10.vkCmdFillBuffer(cmd, restirHistory.handle, 0L, VK10.VK_WHOLE_SIZE, 0);
+                if (restirScratch != null) {
+                    VK10.vkCmdFillBuffer(cmd, restirScratch.handle, 0L, VK10.VK_WHOLE_SIZE, 0);
+                }
+                VK10.vkCmdFillBuffer(cmd, restirPrimary.handle, 0L, VK10.VK_WHOLE_SIZE, 0);
+                VK10.vkCmdFillBuffer(cmd, restirMask.handle, 0L, VK10.VK_WHOLE_SIZE, 0);
+                VulkanCommandEncoder.memoryBarrier(cmd, stack); // cleared reservoirs visible to the trace
+                restirResetPending = false;
+                restirHistoryValid = false;
+            }
+            boolean restirHistoryUsable = restirEnabled && restirHistoryValid && restirEnabledLastFrame;
+            int restirFlags = (restirHistoryUsable ? 1 : 0)
+                    | (CausticaConfig.Rt.Restir.TEMPORAL.value() ? 2 : 0)
+                    | (restirEnabled ? 4 : 0); // the temporal pass owns the pixel's reservoir this frame
             // A reconstruction backend drives the upscale: trace + jitter at render res, the backend
             // denoises and upscales to display res. A debug view observes this ordinary path; it never
             // changes jitter or disables reconstruction.
@@ -1198,6 +1500,19 @@ public final class RtComposite {
             // resolved slot rides along with the uploadPending() call right below.
             BreakEntry[] breaking = breakingEntries(terrain);
             SkyPush sky = skyPush();
+            // Emitter history reset: a light-buffer rebuild changes the set of emitters the stored samples
+            // describe, and a sample that references an emitter which no longer exists would keep shading.
+            long emitterHistoryAddr = 0L;
+            if (emitterHistory != null) {
+                int lightCount = terrain.lightCount();
+                if (emitterHistoryPendingClear || lightCount != emitterHistoryLightCount) {
+                    VK10.vkCmdFillBuffer(cmd, emitterHistory.handle, 0L, VK10.VK_WHOLE_SIZE, 0);
+                    VulkanCommandEncoder.memoryBarrier(cmd, stack); // cleared history visible to the trace
+                    emitterHistoryLightCount = lightCount;
+                    emitterHistoryPendingClear = false;
+                }
+                emitterHistoryAddr = emitterHistory.deviceAddress;
+            }
             new WorldPushData(
                     frameInvViewProj,
                     new Float3((float) (camX - terrain.blockX), (float) (camY - terrain.blockY),
@@ -1233,13 +1548,27 @@ public final class RtComposite {
                     CausticaConfig.Rt.Lights.RIS_CANDIDATES.value(),
                     // Must be the SAME value the exposure resolve divides out this frame (it reads it
                     // from the same RtExposure accessor), or the two stop cancelling.
-                    exposure.preExposure()
+                    exposure.preExposure(),
+                    // ReSTIR PT reservoirs. The history array is read by the temporal pass and written by
+                    // the spatial pass; the scratch array carries the temporal result between the two.
+                    restirEnabled ? restirHistory.deviceAddress : 0L,
+                    restirSpatial && restirScratch != null ? restirScratch.deviceAddress : 0L,
+                    restirEnabled ? CausticaConfig.Rt.Restir.SPATIAL_SAMPLES.value() : 0,
+                    CausticaConfig.Rt.Restir.CONFIDENCE_CAP.value(),
+                    (float) CausticaConfig.Rt.Restir.SPATIAL_RADIUS.value(),
+                    CausticaConfig.Rt.Restir.FIREFLY_CLAMP.value(),
+                    restirFlags,
+                    renderW,
+                    renderH,
+                    emitterHistoryAddr,
+                    CausticaConfig.Rt.Lights.BOUNCE.value() ? 1 : 0
             ).write(push);
             pushBuf.flush(0L, WORLD_PUSH_SIZE);
             // Upload any entity textures registered this frame into the bindless set before the trace.
             RtEntityTextures.INSTANCE.uploadPending(active, atlasSampler(ctx));
             // Build the entity BLAS, the TLAS that references it and the terrain BLAS, then the trace.
             // Barriers separate each stage; the graphics-use timeline guards resource reuse.
+            RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.TLAS);
             if (!fe.blas().isEmpty()) {
                 try (RtFrameStats.Scope ignored = RtFrameStats.FRAME.stage("entity.blasRecord")) {
                     RtAccel.recordBlasBuilds(ctx, cmd, fe.blas());
@@ -1257,6 +1586,7 @@ public final class RtComposite {
                 RtAccel.recordTlasBuild(ctx, cmd, frameTlas);
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // TLAS build visible to the trace
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.TLAS);
 
             // Push the BDA ring slot's address plus the small hot subset used directly by the shaders.
             // Every 64-bit device address the trace needs lives here, not behind worldPushAddr: the
@@ -1269,29 +1599,73 @@ public final class RtComposite {
                     terrain.lightBufferAddress(), terrain.lightAliasBufferAddress(),
                     terrain.lightLocalAliasBufferAddress(), terrain.lightGridCellBufferAddress(),
                     terrain.lightGridSpanBufferAddress(), continuationQueue.deviceAddress,
+                    restirEnabled ? restirPrimary.deviceAddress : 0L,
+                    restirEnabled ? restirMask.deviceAddress : 0L,
                     (int) frameCounter).write(pushConstants);
             // Sky LUTs, from the same WorldPush slot the trace is about to read: the sky the LUT holds and
             // the sky the frame shades are built from one set of angles, not two. Recorded here (after the
             // push flush, before the trace) so the miss shader's very first fetch sees this frame's dome.
+            RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.SKY_LUT);
             try (RtFrameStats.Scope ignored = RtFrameStats.FRAME.stage("frame.skyLut")) {
                 skyLut.record(cmd, pushBuf.deviceAddress);
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // sky LUT writes visible to raygen/miss
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.SKY_LUT);
 
+            RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.PRIMARY);
             try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "world primary trace");
                  RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.tracePrimary")) {
                 active.trace(cmd, renderW, renderH, pushConstants, 0);
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // continuation/guide writes visible to pass B
-            try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "world indirect trace");
-                 RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.traceIndirect")) {
-                active.trace(cmd, renderW, renderH, pushConstants, 1);
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.PRIMARY);
+            RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.INDIRECT);
+            if (restirEnabled) {
+                // Path generation + temporal reuse, then the ordinary indirect pass for the pixels ReSTIR
+                // handed back, then neighbor reuse + shading. The temporal pass writes the base direct
+                // lanes and a reservoir for every pixel; the indirect pass early-outs on valid reservoirs,
+                // and the spatial pass adds the resampled indirect contribution and finalizes history.
+                RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.RESTIR_TEMPORAL);
+                try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "ReSTIR temporal");
+                     RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.restirTemporal")) {
+                    active.trace(cmd, renderW, renderH, pushConstants, 2);
+                }
+                RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.RESTIR_TEMPORAL);
+                VulkanCommandEncoder.memoryBarrier(cmd, stack); // temporal reservoirs visible to the fallback
+            } else {
+                try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "world indirect trace");
+                     RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.traceIndirect")) {
+                    active.trace(cmd, renderW, renderH, pushConstants, 1);
+                }
             }
+            if (restirEnabled) {
+                RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.RESTIR_FALLBACK);
+                try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "ReSTIR indirect fallback");
+                     RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.restirIndirect")) {
+                    active.trace(cmd, renderW, renderH, pushConstants, 1);
+                }
+                RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.RESTIR_FALLBACK);
+                if (restirSpatial) {
+                    VulkanCommandEncoder.memoryBarrier(cmd, stack); // fallback image + temporal reservoirs visible
+                    RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.RESTIR_SPATIAL);
+                    try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "ReSTIR spatial");
+                         RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.restirSpatial")) {
+                        active.trace(cmd, renderW, renderH, pushConstants, 3);
+                    }
+                    RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.RESTIR_SPATIAL);
+                }
+            }
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.INDIRECT);
+            // The spatial pass finalized every pixel's history, or temporal-only mode did so in the
+            // temporal pass; either way this frame's history can seed the next frame.
+            restirHistoryValid = restirEnabled;
+            restirEnabledLastFrame = restirEnabled;
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // RT writes visible to reconstruction reads
             // Reconstruction: the RT pass wrote noisy color (render res) + guides; the active backend reads
             // them and writes the display-res result straight into rrOutput. Jitter is passed in the ray's
             // own convention (the value applied to the primary ray); translating it to a backend's sign
             // convention is that backend's job.
+            RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.RECON);
             if (reconActive && RtRecon.INSTANCE.ensure(cmd, renderW, renderH, displayW, displayH)) {
                 try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "reconstruction");
                      RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.recon")) {
@@ -1318,6 +1692,7 @@ public final class RtComposite {
                     blitUpscale(cmd, stack, output, rrOutput);
                 }
             }
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.RECON);
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // rrOutput + guides visible to everything below
 
             // Motion blur integrates the finished display-res image along the traced motion vectors. It runs
@@ -1330,6 +1705,7 @@ public final class RtComposite {
             // fallback blit) earlier in this same command buffer, and a pass that samples an image without a
             // preceding barrier is reading it while that write may still be in flight.
             long sceneSource = rrOutput.view;
+            RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.MOTION_BLUR);
             if (CausticaConfig.Rt.MotionBlur.active()) {
                 try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "motion blur");
                      RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.motionBlur")) {
@@ -1343,6 +1719,7 @@ public final class RtComposite {
                     sceneSource = blurredScene.view;
                 }
             }
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.MOTION_BLUR);
             // Bloom and the display mapper must both read whichever scene image is being displayed this
             // frame. The two pipelines cache their bindings, so this is free while the choice is unchanged —
             // and when it does change, no in-flight frame may still reference the old binding.
@@ -1363,13 +1740,16 @@ public final class RtComposite {
             // made the histogram's log-luminance average biased by Monte-Carlo noise (Jensen's inequality
             // on the concave log()), so the computed exposure drifted with SPP; rrOutput is stable
             // regardless of SPP, keeping exposure consistent.
+            RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.EXPOSURE);
             try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "exposure");
                  RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.exposure")) {
                 exposure.record(ctx, cmd, stack, rrOutput, gDepth, gAlbedo);
                 exposure.recordStateReadback(cmd, stack);
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // exposure image visible to the display mapper
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.EXPOSURE);
 
+            RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.BLOOM);
             try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "bloom");
                  RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.bloom")) {
                 RtLookPackage.Bloom bloom = LOOK.bloom();
@@ -1379,6 +1759,8 @@ public final class RtComposite {
                         bloom.thresholdSceneLinear(), bloom.softKneeFraction(), bloom.radius());
             }
 
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.BLOOM);
+            RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.DISPLAY_MAP);
             try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "map RT to display");
                  RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.displayMap")) {
                 displayPipeline.dispatch(cmd, displayW, displayH, CausticaConfig.Rt.Hdr.enabled(),
@@ -1403,12 +1785,16 @@ public final class RtComposite {
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack);
 
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.DISPLAY_MAP);
+            RtGpuProfile.INSTANCE.markStart(cmd, RtGpuProfile.Stage.COPY_OUTPUT);
             try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "copy composite to main target");
                  RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.copyOutput")) {
                 VK10.vkCmdCopyImage(cmd, displayImage.image, VK10.VK_IMAGE_LAYOUT_GENERAL,
                         dstImage, VK10.VK_IMAGE_LAYOUT_GENERAL, copyRegion(stack, displayW, displayH));
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack);
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.COPY_OUTPUT);
+            RtGpuProfile.INSTANCE.markEnd(cmd, RtGpuProfile.Stage.FRAME);
         }
         if (VK10.vkEndCommandBuffer(cmd) != VK10.VK_SUCCESS) {
             throw new IllegalStateException("vkEndCommandBuffer(rt composite) failed");
@@ -1581,9 +1967,37 @@ public final class RtComposite {
                 : Math.pow((value + 0.055) / 1.055, 2.4);
     }
 
+    private boolean hasRestirStorage() {
+        return restirHistory != null || restirScratch != null || restirPrimary != null || restirMask != null;
+    }
+
+    /** Releases the ReSTIR arrays. The caller must quiesce the device when a frame may still use them. */
+    private void releaseRestirStorage() {
+        if (restirHistory != null) {
+            restirHistory.destroy();
+            restirHistory = null;
+        }
+        if (restirScratch != null) {
+            restirScratch.destroy();
+            restirScratch = null;
+        }
+        if (restirPrimary != null) {
+            restirPrimary.destroy();
+            restirPrimary = null;
+        }
+        if (restirMask != null) {
+            restirMask.destroy();
+            restirMask = null;
+        }
+        restirHistoryValid = false;
+        restirEnabledLastFrame = false;
+        restirResetPending = true;
+    }
+
     public void destroy() {
         // Teardown runs after the device is idle (CLIENT_STOPPING waits), so the TLAS ring's slots are no
         // longer in flight and can be freed immediately.
+        RtGpuProfile.INSTANCE.destroy();
         tlasRing.destroy();
         RtRecon.INSTANCE.destroy();
         if (displayImage != null) {
@@ -1612,6 +2026,11 @@ public final class RtComposite {
             continuationQueue.destroy();
             continuationQueue = null;
         }
+        if (emitterHistory != null) {
+            emitterHistory.destroy();
+            emitterHistory = null;
+        }
+        releaseRestirStorage();
         destroyGuideImages();
         exposure.destroy();
         if (displayPipeline != null) {

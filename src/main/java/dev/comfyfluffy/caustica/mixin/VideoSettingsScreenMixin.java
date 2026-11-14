@@ -4,9 +4,11 @@ import dev.comfyfluffy.caustica.CausticaConfig;
 import dev.comfyfluffy.caustica.client.RtVideoOptions;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.components.OptionsList;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.options.VideoSettingsScreen;
 import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
@@ -18,12 +20,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Surfaces the runtime-tunable RT settings inside the vanilla Video Settings screen when the RT renderer is
- * enabled. Two changes, both gated on {@link CausticaConfig.Rt#ENABLED}:
+ * enabled. These changes are all gated on {@link CausticaConfig.Rt#ENABLED}:
  *
  * <ul>
  *   <li>The Quality section drops the vanilla options the path tracer supersedes (Ambient Occlusion and
  *       Entity Shadows are computed by RT global illumination / RT shadows).</li>
  *   <li>A trailing "Ray Tracing" section adds the {@link RtVideoOptions} controls.</li>
+ *   <li>The section ends with a reset button that restores every Caustica setting and rewrites
+ *       {@code config/caustica.toml}, then rebuilds the screen so the widgets show the restored values.</li>
  * </ul>
  *
  * When RT is disabled the screen is left exactly as vanilla built it.
@@ -69,6 +73,16 @@ public abstract class VideoSettingsScreenMixin {
         }
         list.addHeader(CAUSTICA$RT_HEADER);
         list.addSmall(RtVideoOptions.runtimeOptions());
+        // Rebuilding the screen is how the widgets pick up the restored values; defer it so the option list
+        // is not mutated while it is iterating the click that asked for the reset, and skip it if the player
+        // left the screen in the meantime.
+        Screen screen = (Screen) (Object) this;
+        list.addBig(RtVideoOptions.resetDefaultsButton(
+                () -> Minecraft.getInstance().execute(() -> {
+                    if (Minecraft.getInstance().gui.screen() == screen) {
+                        ((ScreenInvoker) screen).causticaRebuildWidgets();
+                    }
+                })));
     }
 
     @Inject(method = "removed", at = @At("TAIL"))

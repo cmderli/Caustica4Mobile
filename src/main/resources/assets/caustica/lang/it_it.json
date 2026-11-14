@@ -1,51 +1,39 @@
 {
 	"caustica.options.rt.header": "Ray tracing",
-
 	"caustica.options.rt.exposureMode": "Esposizione",
 	"caustica.options.rt.exposureMode.tooltip": "Come l'immagine con ray tracing viene mappata sulla luminosità del display. Auto si adatta alla luminanza della scena; Manuale usa direttamente il valore di esposizione.",
 	"caustica.options.rt.exposureMode.auto": "Auto",
 	"caustica.options.rt.exposureMode.manual": "Manuale",
-
 	"caustica.options.rt.manualEv": "Esposizione EV",
 	"caustica.options.rt.manualEv.tooltip": "Compensazione dell'esposizione in stop. In Manuale è l'esposizione fissa. In Auto sposta l'esposizione automatica rendendola più chiara o più scura.",
-
 	"caustica.options.rt.gamma": "Gamma",
 	"caustica.options.rt.gamma.tooltip": "Gamma di luminanza dopo la trasformazione. Valori sotto 1,00 schiariscono ombre e mezzitoni preservando nero, bianco e i rapporti tra i colori.",
-
 	"caustica.options.rt.spp": "Campioni per pixel",
 	"caustica.options.rt.spp.tooltip": "Campioni di path tracing presi per pixel in ogni fotogramma. Valori più alti sono più puliti, ma più esigenti.",
-
 	"caustica.options.rt.maxBounces": "Rimbalzi del percorso",
 	"caustica.options.rt.maxBounces.tooltip": "Numero massimo di rimbalzi secondari del path tracing dopo il primo colpo. Valori più alti catturano più luce indiretta, ma costano di più.",
-
+	"caustica.options.rt.restir": "ReSTIR PT",
+	"caustica.options.rt.restir.tooltip": "Riutilizza i percorsi indiretti tra pixel e fotogrammi (ReSTIR PT). Luce indiretta più nitida con pochi campioni; si applica solo ai colpi primari opachi.",
 	"caustica.options.rt.entities": "Entità con ray tracing",
 	"caustica.options.rt.entities.tooltip": "Include entità ed entità blocco nella scena con ray tracing.",
-
 	"caustica.options.rt.particles": "Particelle con ray tracing",
 	"caustica.options.rt.particles.tooltip": "Disegna le particelle come billboard dei raggi della telecamera nella scena tracciata.",
-
 	"caustica.options.rt.glow": "Contorno luminoso entità",
 	"caustica.options.rt.glow.tooltip": "Disegna il contorno vanilla dell'effetto Luminescenza (attraverso i muri) attorno alle entità luminose.",
-
 	"caustica.options.rt.waterWaves": "Acqua animata",
 	"caustica.options.rt.waterWaves.tooltip": "Anima le normali della superficie dell'acqua per riflessi di onde in movimento.",
-
 	"caustica.options.rt.motionBlur": "Sfocatura di movimento",
 	"caustica.options.rt.motionBlur.tooltip": "Sfoca l'immagine lungo i vettori di movimento reali di ogni pixel durante l'intervallo dell'otturatore. Le rotazioni della camera e gli oggetti in movimento lasciano scie come con un otturatore cinematografico; il costo è una passata alla risoluzione dello schermo.",
 	"caustica.options.rt.motionBlurShutter": "Angolo dell'otturatore",
 	"caustica.options.rt.motionBlurShutter.tooltip": "Quanta parte dell'intervallo tra fotogrammi l'otturatore virtuale resta aperto, in gradi: 180 è lo standard cinematografico (metà intervallo), 360 lo lascia aperto per tutto il tempo, 0 disattiva la scia.",
 	"caustica.options.rt.motionBlurSamples": "Campioni di sfocatura di movimento",
 	"caustica.options.rt.motionBlurSamples.tooltip": "Campioni mediati lungo la scia. Più sono, più il movimento rapido risulta fluido; 8 è un buon valore predefinito.",
-
 	"caustica.options.rt.hdr": "Uscita HDR",
 	"caustica.options.rt.hdr.tooltip": "Ricrea la swapchain per l'uscita HDR (ST.2084/PQ) o SDR nativa. Viene applicato al successivo confine di fotogramma.",
-
 	"caustica.options.rt.hdrUiBrightness": "Luminosità dell'interfaccia HDR",
 	"caustica.options.rt.hdrUiBrightness.tooltip": "Luminosità assoluta (in nit) assegnata all'interfaccia pensata per l'SDR su un display HDR. BT.2408 pone il bianco grafico SDR a 203 nit; con un picco di 1000 nit, la trasformazione di uscita HDR di ACES pone una superficie bianca della scena intorno a 107 nit.",
-
 	"caustica.options.rt.hdrPeak": "Luminosità di picco HDR",
 	"caustica.options.rt.hdrPeak.tooltip": "Luminosità assoluta (in nit) verso cui sfumano le alte luci. Impostala sulla luminosità HDR di picco del display.",
-
 	"caustica.options.rt.denoiser": "Denoiser",
 	"caustica.options.rt.denoiser.tooltip": "Quale denoiser ripulisce l'immagine tracciata. Auto sceglie il migliore che questa macchina può eseguire. DLSS Ray Reconstruction richiede una GPU NVIDIA RTX, NRD richiede la sua libreria nativa, e il denoiser integrato funziona sempre ma è più morbido perché non ha cronologia dei fotogrammi. Off mostra l'immagine tracciata grezza.",
 	"caustica.options.rt.denoiser.auto": "Auto",
@@ -53,7 +41,6 @@
 	"caustica.options.rt.denoiser.nrd": "NRD",
 	"caustica.options.rt.denoiser.builtin": "Integrato",
 	"caustica.options.rt.denoiser.off": "Off",
-
 	"caustica.options.rt.superResolutionMethod": "Metodo di super risoluzione",
 	"caustica.options.rt.superResolutionMethod.tooltip": "Quale upscaler porta sullo schermo l'immagine a risoluzione di rendering. Auto usa FSR quando il suo runtime è installato, altrimenti SGSR2. Bilineare funziona sempre ma è più morbido.",
 	"caustica.options.rt.superResolutionMethod.auto": "Auto",
@@ -68,7 +55,7 @@
 	"caustica.options.rt.superResolution.2": "Bilanciato",
 	"caustica.options.rt.superResolution.3": "Prestazioni",
 	"caustica.options.rt.superResolution.4": "Ultra prestazioni",
-
+	"caustica.options.rt.superResolution.5": "Prestazioni estreme",
 	"caustica.options.rt.debugView": "Vista di debug",
 	"caustica.options.rt.debugView.tooltip": "Visualizza un buffer intermedio del ray tracing invece dell'immagine finale.",
 	"caustica.options.rt.debugView.0": "Disattivato",
@@ -80,5 +67,11 @@
 	"caustica.options.rt.debugView.6": "Speculare",
 	"caustica.options.rt.debugView.7": "Movimento speculare",
 	"caustica.options.rt.debugView.8": "Falsi colori esposizione",
-	"caustica.options.rt.debugView.9": "Peso di misurazione"
+	"caustica.options.rt.debugView.9": "Peso di misurazione",
+	"caustica.options.rt.lightCandidates": "Candidati luce RIS",
+	"caustica.options.rt.lightCandidates.tooltip": "Candidati di luce dei blocchi campionati per ogni punto ombreggiato. Ogni candidato è un raggio d'ombra, quindi è la leva principale sul numero di raggi: abbassarlo riduce il costo quasi linearmente e rende più rumorosa la luce diretta dei blocchi luminosi. 0 disattiva il campionamento degli emettitori e lascia solo il loro bagliore visibile.",
+	"caustica.options.rt.gpuProfiling": "Profilazione fotogrammi",
+	"caustica.options.rt.gpuProfiling.tooltip": "Registra ogni pochi secondi il tempo GPU effettivo di ogni fase del fotogramma (tracciamento raggi, TLAS, NRD, SGSR2, esposizione, bloom, presentazione) e scrive rt-frame-stats/gpu.csv. Serve a capire quale passaggio costa frame rate; altrimenti lascialo disattivato.",
+	"caustica.options.rt.resetDefaults": "Ripristina impostazioni Caustica",
+	"caustica.options.rt.resetDefaults.tooltip": "Riporta ogni impostazione di Caustica al valore predefinito e riscrive config/caustica.toml. La maggior parte si applica subito; le impostazioni fissate all'avvio (backend di traversata, OMM, thread di lavoro, capacità) hanno effetto al prossimo avvio."
 }

@@ -160,6 +160,11 @@ public final class RtGpuExecutor {
         return new GraphicsUse(latestGraphicsUseValue.get());
     }
 
+    /** Highest frame token the graphics queue has completed; a non-blocking snapshot of the timeline. */
+    public long completedGraphicsValue() {
+        return queryTimeline(graphicsTimeline);
+    }
+
     /** Rethrow a latched executor failure on the calling thread. */
     public void throwIfFailed() {
         checkExecutorFailure();
@@ -615,6 +620,10 @@ public final class RtGpuExecutor {
 
         private GraphicsUse(long value) {
             this.value = value;
+        }
+
+        public long value() {
+            return value;
         }
     }
 

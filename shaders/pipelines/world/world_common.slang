@@ -27,6 +27,8 @@ public struct WorldPushConstants {
     public uint64_t lightGridCellAddr;   // dense light grid cell headers (0 = global proposals only)
     public uint64_t lightGridSpanAddr;   // packed weighted section spans referenced by cell headers
     public uint64_t pathQueueAddr;       // packed primary -> indirect continuation records
+    public uint64_t restirPrimaryAddr;   // visible primary records written by the primary pass (0 = off)
+    public uint64_t restirMaskAddr;      // per-pixel "temporal pass produced a valid reservoir" mask
     public uint frameIndex;
 };
 
@@ -88,6 +90,25 @@ public struct WorldPush {
     // near mid-grey at any scene brightness; the display pass divides it back out, so the two cancel
     // exactly and this cannot change the image. 1.0 disables it.
     public float    preExposure;
+    // ---- ReSTIR PT state. The history array holds the previous frame's finalized reservoirs; the
+    // spatial-reuse pass overwrites it, so it becomes the next frame's history. The scratch array holds
+    // this frame's path-generation + temporal-reuse result and is consumed by the spatial pass.
+    // Reservoir positions are stored camera-relative (world minus camOffset), which keeps them immune to
+    // the terrain rebase origin; the temporal pass adds camDelta to bring the previous frame's samples
+    // into this frame's camera-relative space.
+    public uint64_t restirHistoryAddr;
+    public uint64_t restirScratchAddr;
+    public uint     restirSpatialSamples;  // neighbor samples per pixel (0 = temporal + canonical only)
+    public uint     restirConfidenceCap;   // maximum confidence a reservoir may accumulate
+    public float    restirSpatialRadius;   // spatial neighbor disk radius in render pixels
+    public float    restirFireflyClamp;    // maximum pre-exposed indirect luminance (hue-preserving clamp)
+    public uint     restirFlags;           // bit0 history valid, bit1 temporal reuse, bit2 temporal pass ran
+    // Emitter temporal reuse (ordinary indirect pass). renderSize turns a dispatch pixel into the history
+    // slot; emitterHistoryAddr is 0 while the reuse is off, which disables it in the shader.
+    public uint     renderWidth;
+    public uint     renderHeight;
+    public uint64_t emitterHistoryAddr;
+    public uint     lightBounceRis;       // 1 = emitter NEE also at secondary bounces
 };
 
 // 32-byte hot area-light record. Linear ACEScg radiance uses packed R11G11B10; the
@@ -130,6 +151,24 @@ public struct LightGridSpan {
     public uint packedLightCounts; // low16 self, high16 alias
     public float accept;
 };
+
+// Per-pixel emitter reservoir carried between frames by the ordinary indirect pass. It stores one complete
+// light sample (not an index) so reuse needs exactly one coalesced load and no random light-buffer fetch:
+// the point is camera-relative, which keeps it immune to the terrain rebase origin, and the remaining fields
+// are directions, radiance and scalars that a rebase cannot invalidate. 64 B keeps one entry per pixel inside
+// a single cache line.
+public struct EmitterHistory {
+    public float spX, spY, spZ;  // sampled point on the emitter, camera-relative
+    public float nX, nY, nZ;     // emitter outward normal
+    public float leX, leY, leZ;  // emitter radiance
+    public float area;           // emitter rectangle area (the area-light pdf factor)
+    public float pdf;            // light-choice proposal pdf that generated this sample
+    public uint  valid;          // 0 = the slot holds no reusable sample
+    public float reserved0;
+    public float reserved1;
+    public float reserved2;
+    public float reserved3;
+}; // 64 B
 
 // TerrainPrim.flags bit 0: this emissive quad is in the light buffer (RtLightCollector membership).
 public static const uint TERRAIN_PRIM_IN_LIGHT_BUFFER = 1u;

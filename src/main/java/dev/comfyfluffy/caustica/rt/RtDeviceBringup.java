@@ -380,6 +380,22 @@ public final class RtDeviceBringup {
                 ? WorldBackend.RAY_QUERY.rayQueryPrimaryShader : serBackend.worldPrimaryRaygenShader;
     }
 
+    /** Ray-query compute entry points for ReSTIR PT. */
+    public static final String RAY_QUERY_RESTIR_TEMPORAL_SHADER = "restir_temporal_rq.comp.spv";
+    public static final String RAY_QUERY_RESTIR_SPATIAL_SHADER = "restir_spatial_rq.comp.spv";
+
+    /** ReSTIR PT path-generation + temporal-reuse entry point for the selected backend. */
+    public static String worldRestirTemporalShader() {
+        return worldBackend == WorldBackend.RAY_QUERY
+                ? RAY_QUERY_RESTIR_TEMPORAL_SHADER : "restir_temporal.rgen.spv";
+    }
+
+    /** ReSTIR PT spatial-reuse + final-shading entry point for the selected backend. */
+    public static String worldRestirSpatialShader() {
+        return worldBackend == WorldBackend.RAY_QUERY
+                ? RAY_QUERY_RESTIR_SPATIAL_SHADER : "restir_spatial.rgen.spv";
+    }
+
     public static boolean serExtEnabled() {
         return serBackend == SerBackend.EXT;
     }

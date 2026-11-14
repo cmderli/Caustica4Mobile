@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class CausticaConfigTest {
@@ -57,6 +57,49 @@ final class CausticaConfigTest {
             assertEquals("auto", upscaler.get());
         } finally {
             upscaler.set(previous);
+        }
+    }
+
+    /**
+     * The reset path is only a loop over {@code restoreDefault()}, so every setting type has to answer with its
+     * hardcoded default rather than with the value currently loaded from the file.
+     */
+    @Test
+    void restoreDefaultIgnoresTheConfiguredValue() {
+        CausticaConfig.IntSetting spp = CausticaConfig.Rt.Composite.SPP;
+        CausticaConfig.BooleanSetting frameGeneration = CausticaConfig.Rt.Fg.ENABLED;
+        CausticaConfig.FloatSetting gamma = CausticaConfig.Rt.Tonemap.GAMMA;
+        CausticaConfig.StringSetting denoiser = CausticaConfig.Rt.Reconstruction.DENOISER;
+        CausticaConfig.OptionalStringSetting nrdPath = CausticaConfig.Nrd.PATH;
+        int previousSpp = spp.get();
+        boolean previousFrameGeneration = frameGeneration.get();
+        float previousGamma = gamma.get();
+        String previousDenoiser = denoiser.get();
+        String previousNrdPath = nrdPath.get();
+        try {
+            spp.set(8);
+            frameGeneration.set(!frameGeneration.defaultValue());
+            gamma.set(1.4f);
+            denoiser.set("off");
+            nrdPath.set("/tmp/does-not-matter.so");
+
+            spp.restoreDefault();
+            frameGeneration.restoreDefault();
+            gamma.restoreDefault();
+            denoiser.restoreDefault();
+            nrdPath.restoreDefault();
+
+            assertEquals(spp.defaultValue(), spp.get());
+            assertEquals(frameGeneration.defaultValue(), frameGeneration.get());
+            assertEquals(gamma.defaultValue(), gamma.get());
+            assertEquals(denoiser.defaultValue(), denoiser.get());
+            assertNull(nrdPath.get(), "an optional path falls back to unset");
+        } finally {
+            spp.set(previousSpp);
+            frameGeneration.set(previousFrameGeneration);
+            gamma.set(previousGamma);
+            denoiser.set(previousDenoiser);
+            nrdPath.set(previousNrdPath);
         }
     }
 
